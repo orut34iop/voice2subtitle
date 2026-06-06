@@ -9,6 +9,7 @@ struct OverlayView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var interactionState: OverlayInteractionState
     @Namespace private var captionFlowNamespace
+    @State private var isBackgroundVisible = false
     @State private var renderedPassThroughBubble: OverlayPassThroughBubble?
     @State private var passThroughRevealProgress: Double = 0.0
     @State private var lastDraftSlotHeight: CGFloat = 0.0
@@ -26,6 +27,14 @@ struct OverlayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             syncPassThroughBubble(interactionState.passThroughBubble)
+            updateBackgroundVisibility(animated: false)
+        }
+        .onChange(of: interactionState.isOverlayHovered) { _, isHovered in
+            guard model.overlayStyle.showBackgroundOnlyOnHover else { return }
+            updateBackgroundVisibility(isHovered: isHovered, animated: true)
+        }
+        .onChange(of: model.overlayStyle.showBackgroundOnlyOnHover) { _, showOnlyOnHover in
+            updateBackgroundVisibility(isHovered: showOnlyOnHover ? interactionState.isOverlayHovered : true, animated: true)
         }
         .onChange(of: interactionState.passThroughBubble) { _, bubble in
             syncPassThroughBubble(bubble)
@@ -117,10 +126,11 @@ struct OverlayView: View {
                 // spend the full bottom edge budget when the window is shrunk.
                 .padding(.top, 12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(backgroundView)
+                .background(backgroundView.opacity(isBackgroundVisible ? 1 : 0))
                 .overlay(
                     RoundedRectangle(cornerRadius: OverlayPanelMetrics.cornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                        .opacity(isBackgroundVisible ? 1 : 0)
                 )
             }
         }
@@ -728,6 +738,33 @@ struct OverlayView: View {
             .compositingGroup()
     }
 
+    private var isBackgroundVisibleWhenNeeded: Bool {
+        model.overlayStyle.showBackgroundOnlyOnHover
+            ? interactionState.isOverlayHovered
+            : true
+    }
+
+    private func updateBackgroundVisibility(isHovered: Bool, animated: Bool) {
+        let target = isHovered
+        guard target != isBackgroundVisible else { return }
+
+        let apply = {
+            isBackgroundVisible = target
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.15)) {
+                apply()
+            }
+        } else {
+            apply()
+        }
+    }
+
+    private func updateBackgroundVisibility(animated: Bool) {
+        updateBackgroundVisibility(isHovered: isBackgroundVisibleWhenNeeded, animated: animated)
+    }
+
     private func syncPassThroughBubble(_ bubble: OverlayPassThroughBubble?) {
         if let bubble {
             renderedPassThroughBubble = bubble
@@ -1321,6 +1358,7 @@ private struct OverlayResizeGlyph: View {
 final class OverlayInteractionState: ObservableObject {
     @Published private(set) var passThroughBubble: OverlayPassThroughBubble?
     @Published private(set) var scrollbarRevealProgress: CGFloat = 0.0
+    @Published private(set) var isOverlayHovered: Bool = false
 
     func updatePassThroughBubble(_ bubble: OverlayPassThroughBubble?) {
         guard needsUpdate(from: passThroughBubble, to: bubble) else { return }
@@ -1331,6 +1369,11 @@ final class OverlayInteractionState: ObservableObject {
         let clampedProgress = min(max(progress, 0.0), 1.0)
         guard abs(scrollbarRevealProgress - clampedProgress) > 0.01 else { return }
         scrollbarRevealProgress = clampedProgress
+    }
+
+    func updateIsOverlayHovered(_ isHovered: Bool) {
+        guard isOverlayHovered != isHovered else { return }
+        isOverlayHovered = isHovered
     }
 
     private func needsUpdate(from current: OverlayPassThroughBubble?, to next: OverlayPassThroughBubble?) -> Bool {

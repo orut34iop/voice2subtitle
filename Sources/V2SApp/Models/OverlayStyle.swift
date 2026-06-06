@@ -80,6 +80,7 @@ struct OverlayStyle: Codable, Equatable {
         case overlayScaleFactor
         case attachToSource
         case alwaysOnTopInFullscreen
+        case showBackgroundOnlyOnHover
     }
 
     private enum LegacyCodingKeys: String, CodingKey {
@@ -104,6 +105,7 @@ struct OverlayStyle: Codable, Equatable {
     var overlayScaleFactor: Double
     var attachToSource: Bool
     var alwaysOnTopInFullscreen: Bool
+    var showBackgroundOnlyOnHover: Bool
 
     var scaledTranslatedFontSize: Double { translatedFontSize * overlayScaleFactor }
     var scaledSourceFontSize: Double { sourceFontSize * overlayScaleFactor }
@@ -125,7 +127,8 @@ struct OverlayStyle: Codable, Equatable {
         translatedFirst: true,
         overlayScaleFactor: 1.0,
         attachToSource: false,
-        alwaysOnTopInFullscreen: true
+        alwaysOnTopInFullscreen: true,
+        showBackgroundOnlyOnHover: true
     )
 
     init(
@@ -145,7 +148,8 @@ struct OverlayStyle: Codable, Equatable {
         translatedFirst: Bool,
         overlayScaleFactor: Double = 1.0,
         attachToSource: Bool = false,
-        alwaysOnTopInFullscreen: Bool = true
+        alwaysOnTopInFullscreen: Bool = true,
+        showBackgroundOnlyOnHover: Bool = true
     ) {
         self.targetDisplayID = targetDisplayID
         self.topInset = topInset
@@ -164,6 +168,7 @@ struct OverlayStyle: Codable, Equatable {
         self.overlayScaleFactor = overlayScaleFactor
         self.attachToSource = attachToSource
         self.alwaysOnTopInFullscreen = alwaysOnTopInFullscreen
+        self.showBackgroundOnlyOnHover = showBackgroundOnlyOnHover
     }
 
     init(from decoder: Decoder) throws {
@@ -194,6 +199,10 @@ struct OverlayStyle: Codable, Equatable {
         alwaysOnTopInFullscreen = try c.decodeIfPresent(
             Bool.self,
             forKey: .alwaysOnTopInFullscreen
+        ) ?? true
+        showBackgroundOnlyOnHover = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .showBackgroundOnlyOnHover
         ) ?? true
     }
 }

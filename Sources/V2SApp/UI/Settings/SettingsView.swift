@@ -266,6 +266,13 @@ struct SettingsView: View {
                             .labelsHidden()
                             .help(model.localized(.alwaysOnTopInFullscreenHelp))
                     }
+                    Divider()
+                    settingsRow(model.localized(.showBackgroundOnlyOnHover)) {
+                        Toggle("", isOn: showBackgroundOnlyOnHoverBinding)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .help(model.localized(.showBackgroundOnlyOnHoverHelp))
+                    }
                 }
                 settingsCard {
                     sectionHeader(model.localized(.subtitleColor), icon: "paintpalette")
@@ -469,6 +476,10 @@ struct SettingsView: View {
 
     private var attachToSourceBinding: Binding<Bool> {
         overlayBinding(\.attachToSource)
+    }
+
+    private var showBackgroundOnlyOnHoverBinding: Binding<Bool> {
+        overlayBinding(\.showBackgroundOnlyOnHover)
     }
 
     private var translatedFontBinding: Binding<Double> {

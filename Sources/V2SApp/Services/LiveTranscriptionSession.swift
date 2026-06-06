@@ -91,6 +91,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         case speechPermissionDenied
         case microphonePermissionDenied
         case audioCapturePermissionDenied
+        case privacyUsageDescriptionMissing(String)
         case unsupportedSpeechLocale(String)
         case unavailableSpeechRecognizer(String)
         case missingMicrophoneDevice
@@ -106,6 +107,8 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
                 return AppLocalization.string(.microphonePermissionDenied, languageID: languageID)
             case .audioCapturePermissionDenied:
                 return AppLocalization.string(.appAudioCapturePermissionDenied, languageID: languageID)
+            case .privacyUsageDescriptionMissing(let key):
+                return AppLocalization.string(.privacyUsageDescriptionMissingFormat, languageID: languageID, key)
             case .unsupportedSpeechLocale(let localeIdentifier):
                 return AppLocalization.string(.unsupportedSpeechLocaleFormat, languageID: languageID, localeIdentifier)
             case .unavailableSpeechRecognizer(let localeIdentifier):
@@ -304,6 +307,8 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
     }
 
     private func requestRequiredPermissions(for source: InputSource) async throws {
+        try requirePrivacyUsageDescription("NSSpeechRecognitionUsageDescription")
+
         let speechStatus = SFSpeechRecognizer.authorizationStatus()
 
         switch speechStatus {
@@ -322,6 +327,8 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
         switch source.category {
         case .microphone:
+            try requirePrivacyUsageDescription("NSMicrophoneUsageDescription")
+
             let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
 
             switch microphoneStatus {
@@ -338,7 +345,14 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
                 throw SessionError.microphonePermissionDenied
             }
         case .application:
-            break
+            try requirePrivacyUsageDescription("NSAudioCaptureUsageDescription")
+        }
+    }
+
+    private func requirePrivacyUsageDescription(_ key: String) throws {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+              value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            throw SessionError.privacyUsageDescriptionMissing(key)
         }
     }
 

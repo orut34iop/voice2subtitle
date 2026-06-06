@@ -54,6 +54,8 @@ enum AppTextKey: String {
     case attachToSource
     case alwaysOnTopInFullscreen
     case alwaysOnTopInFullscreenHelp
+    case showBackgroundOnlyOnHover
+    case showBackgroundOnlyOnHoverHelp
     case subtitleColor
     case backgroundColor
     case resetColors
@@ -128,6 +130,7 @@ enum AppTextKey: String {
     case speechPermissionDenied
     case microphonePermissionDenied
     case appAudioCapturePermissionDenied
+    case privacyUsageDescriptionMissingFormat
     case unsupportedSpeechLocaleFormat
     case unavailableSpeechRecognizerFormat
     case missingMicrophoneDevice
@@ -338,6 +341,8 @@ enum AppLocalization {
             "attachToSource": "Attach to Source",
             "alwaysOnTopInFullscreen": "Always on Top (including fullscreen)",
             "alwaysOnTopInFullscreenHelp": "Keep subtitles above fullscreen apps and windows.",
+            "showBackgroundOnlyOnHover": "Show background only on hover",
+            "showBackgroundOnlyOnHoverHelp": "Show the panel background only when the mouse is over it.",
             "subtitleColor": "Subtitle Color",
             "backgroundColor": "Background Color",
             "resetColors": "Reset Colors",
@@ -412,6 +417,7 @@ enum AppLocalization {
             "speechPermissionDenied": "Speech recognition permission was denied.",
             "microphonePermissionDenied": "Microphone permission was denied.",
             "appAudioCapturePermissionDenied": "App audio capture permission was denied. Allow v2s to capture audio from other apps, then reopen the app.",
+            "privacyUsageDescriptionMissingFormat": "This build is missing %@ in Info.plist. Build and run the v2s.app target so macOS can show the required privacy prompt.",
             "unsupportedSpeechLocaleFormat": "Speech recognition does not support %@.",
             "unavailableSpeechRecognizerFormat": "Speech recognition is currently unavailable for %@.",
             "missingMicrophoneDevice": "The selected microphone is no longer available.",
@@ -502,6 +508,8 @@ enum AppLocalization {
             "attachToSource": "附着到源应用",
             "alwaysOnTopInFullscreen": "始终置顶（包含全屏）",
             "alwaysOnTopInFullscreenHelp": "开启后字幕会始终显示在全屏窗口之上。",
+            "showBackgroundOnlyOnHover": "仅鼠标悬停时显示背景",
+            "showBackgroundOnlyOnHoverHelp": "仅在鼠标经过字幕区域时显示底部面板背景。",
             "subtitleColor": "字幕颜色",
             "backgroundColor": "背景颜色",
             "resetColors": "重置颜色",
@@ -576,6 +584,7 @@ enum AppLocalization {
             "speechPermissionDenied": "语音识别权限被拒绝。",
             "microphonePermissionDenied": "麦克风权限被拒绝。",
             "appAudioCapturePermissionDenied": "应用音频采集权限被拒绝。请允许 v2s 采集其他应用的音频，然后重新打开应用。",
+            "privacyUsageDescriptionMissingFormat": "当前构建的 Info.plist 缺少 %@。请构建并运行 v2s.app 目标，让 macOS 可以显示所需的隐私授权提示。",
             "unsupportedSpeechLocaleFormat": "语音识别不支持 %@。",
             "unavailableSpeechRecognizerFormat": "当前 %@ 的语音识别不可用。",
             "missingMicrophoneDevice": "所选麦克风已不可用。",

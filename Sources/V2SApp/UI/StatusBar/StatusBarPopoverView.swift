@@ -181,6 +181,13 @@ struct StatusBarPopoverView: View {
                         .labelsHidden()
                         .help(model.localized(.alwaysOnTopInFullscreenHelp))
                 }
+                SettingsControlRow(label: model.localized(.showBackgroundOnlyOnHover)) {
+                    Toggle("", isOn: showBackgroundOnlyOnHoverBinding)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                        .help(model.localized(.showBackgroundOnlyOnHoverHelp))
+                }
             }
             VStack(spacing: 8) {
                 compactSlider(
@@ -290,6 +297,12 @@ struct StatusBarPopoverView: View {
         Binding(
             get: { model.overlayStyle.alwaysOnTopInFullscreen },
             set: { v in model.updateOverlayStyle { $0.alwaysOnTopInFullscreen = v } }
+        )
+    }
+    private var showBackgroundOnlyOnHoverBinding: Binding<Bool> {
+        Binding(
+            get: { model.overlayStyle.showBackgroundOnlyOnHover },
+            set: { v in model.updateOverlayStyle { $0.showBackgroundOnlyOnHover = v } }
         )
     }
     private var sourceFontBinding: Binding<Double> {

@@ -282,6 +282,7 @@ final class OverlayWindowController {
             panelsShown = false
             stopMouseTracking()
             stopSourceWindowTracking()
+            interactionState.updateIsOverlayHovered(false)
             interactionState.updatePassThroughBubble(nil)
             animateGenieHide()
         }
@@ -311,6 +312,7 @@ final class OverlayWindowController {
             if geniePhase == .showing { cancelGenieAnimation() }
             stopMouseTracking()
             stopSourceWindowTracking()
+            interactionState.updateIsOverlayHovered(false)
             interactionState.updatePassThroughBubble(nil)
             animateGenieHide()
         } else if shouldShow && geniePhase == .idle {
@@ -874,12 +876,15 @@ final class OverlayWindowController {
         mouseTrackingTimer?.invalidate()
         mouseTrackingTimer = nil
         mouseTrackingMode = .idle
+        interactionState.updateIsOverlayHovered(false)
+        interactionState.updatePassThroughBubble(nil)
     }
 
     private func updatePassThroughBubble() {
         guard model.isOverlayVisible,
               model.overlayState != nil else {
             interactionState.updateScrollbarRevealProgress(0.0)
+            interactionState.updateIsOverlayHovered(false)
             interactionState.updatePassThroughBubble(nil)
             return
         }
@@ -890,12 +895,14 @@ final class OverlayWindowController {
             scrollbarRevealProgress(for: mouseLocation, scrollbarFrame: scrollbarPanel.frame)
         )
 
+        let overlayFrame = panel.frame
+        interactionState.updateIsOverlayHovered(overlayFrame.contains(mouseLocation))
+
         guard model.overlayStyle.clickThrough else {
             interactionState.updatePassThroughBubble(nil)
             return
         }
 
-        let overlayFrame = panel.frame
         guard overlayFrame.contains(mouseLocation) else {
             interactionState.updatePassThroughBubble(nil)
             return
