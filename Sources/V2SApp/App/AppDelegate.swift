@@ -88,6 +88,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
     }
 
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        settingsWindowController?.showSettings()
+        return false
+    }
+
     // MARK: - Single-instance enforcement
 
     private func handOffToExistingInstanceIfPossible() -> Bool {

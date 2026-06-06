@@ -45,6 +45,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         )
         window.contentViewController = hostingController
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 560, height: 520))
         window.center()
         super.init(window: window)
