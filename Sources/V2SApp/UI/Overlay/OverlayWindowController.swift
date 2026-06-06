@@ -136,6 +136,13 @@ final class OverlayWindowController {
         )
 
         configurePanels()
+        subtitleHostingView.rootView = OverlayView(
+            model: model,
+            interactionState: interactionState,
+            onOverlayDragStart: { [weak self] in self?.beginOverlayDrag() },
+            onOverlayDragChanged: { [weak self] translation in self?.updateOverlayDrag(with: translation) },
+            onOverlayDragEnded: { [weak self] in self?.endOverlayDrag() }
+        )
         moveButtonHostingView.rootView = OverlayMoveButtonView(
             onMoveDragStart: { [weak self] in self?.beginControlDrag() },
             onMoveDragChanged: { [weak self] translation in self?.updateControlDrag(with: translation) },
@@ -170,7 +177,7 @@ final class OverlayWindowController {
     }
 
     private func configurePanels() {
-        configurePanel(panel, acceptsInput: false, level: overlayHighContentLevel)
+        configurePanel(panel, acceptsInput: true, level: overlayHighContentLevel)
         panel.contentView = subtitleHostingView
 
         configurePanel(controlsChromePanel, acceptsInput: false, level: overlayHighContentLevel)
@@ -199,6 +206,18 @@ final class OverlayWindowController {
 
     private var leftControlButtonPanels: [OverlayPanel] {
         [moveButtonPanel, resetSizeButtonPanel, closeButtonPanel, resizeButtonPanel]
+    }
+
+    private var sideControlPanels: [OverlayPanel] {
+        leftControlPanels + [scrollbarPanel]
+    }
+
+    private var shouldShowSideControls: Bool {
+        if case .running = model.sessionState {
+            return false
+        }
+
+        return true
     }
 
     private var overlayHighContentLevel: NSWindow.Level {
@@ -246,6 +265,10 @@ final class OverlayWindowController {
             .store(in: &cancellables)
 
         model.$overlayStyle
+            .sink { [weak self] _ in self?.scheduleWindowSync() }
+            .store(in: &cancellables)
+
+        model.$sessionState
             .sink { [weak self] _ in self?.scheduleWindowSync() }
             .store(in: &cancellables)
 
@@ -357,7 +380,7 @@ final class OverlayWindowController {
         )
 
         // Hide control panels during animation
-        let controlPanels = leftControlPanels + [scrollbarPanel]
+        let controlPanels = sideControlPanels
         controlPanels.forEach { $0.alphaValue = 0; $0.orderOut(nil) }
 
         // Set initial state for main panel
@@ -549,8 +572,13 @@ final class OverlayWindowController {
     }
 
     private func fadeInControlPanels() {
+        guard shouldShowSideControls else {
+            orderOutSideControls()
+            return
+        }
+
         positionPanels()
-        let controlPanels = leftControlPanels + [scrollbarPanel]
+        let controlPanels = sideControlPanels
         controlPanels.forEach { $0.alphaValue = 0; $0.orderFront(nil) }
 
         NSAnimationContext.runAnimationGroup { context in
@@ -560,13 +588,25 @@ final class OverlayWindowController {
         }
     }
 
+    private func orderOutSideControls() {
+        sideControlPanels.forEach {
+            $0.alphaValue = 0
+            $0.orderOut(nil)
+        }
+    }
+
     // MARK: - Panel Ordering
 
     private func orderFrontAllPanels() {
         panel.orderFront(nil)
         panel.orderFrontRegardless()
 
-        for controlPanel in leftControlPanels + [scrollbarPanel] {
+        guard shouldShowSideControls else {
+            orderOutSideControls()
+            return
+        }
+
+        for controlPanel in sideControlPanels {
             controlPanel.orderFront(nil)
             controlPanel.orderFrontRegardless()
         }
@@ -574,7 +614,7 @@ final class OverlayWindowController {
 
     private func orderOutAllPanels() {
         panel.orderOut(nil)
-        for controlPanel in leftControlPanels + [scrollbarPanel] {
+        for controlPanel in sideControlPanels {
             controlPanel.orderOut(nil)
         }
     }
@@ -654,6 +694,19 @@ final class OverlayWindowController {
             for (buttonPanel, frame) in zip(leftControlButtonPanels, buttonFrames) {
                 buttonPanel.setFrame(frame, display: true)
             }
+        }
+
+        if shouldShowSideControls {
+            sideControlPanels.forEach { controlPanel in
+                controlPanel.alphaValue = 1
+                if panelsShown, controlPanel.isVisible == false {
+                    controlPanel.orderFront(nil)
+                    controlPanel.orderFrontRegardless()
+                }
+            }
+        } else {
+            orderOutSideControls()
+            interactionState.updateScrollbarRevealProgress(0)
         }
 
         if panelsShown {
@@ -780,6 +833,18 @@ final class OverlayWindowController {
         dragStartTopLeft = nil
     }
 
+    private func beginOverlayDrag() {
+        beginControlDrag()
+    }
+
+    private func updateOverlayDrag(with translation: CGSize) {
+        updateControlDrag(with: translation)
+    }
+
+    private func endOverlayDrag() {
+        endControlDrag()
+    }
+
     private func beginResizeDrag() {
         resizeDragStartWidth = panel.frame.width
         resizeDragStartHeight = panel.frame.height
@@ -891,9 +956,13 @@ final class OverlayWindowController {
 
         let mouseLocation = NSEvent.mouseLocation
         updateMouseTrackingMode(for: mouseLocation)
-        interactionState.updateScrollbarRevealProgress(
-            scrollbarRevealProgress(for: mouseLocation, scrollbarFrame: scrollbarPanel.frame)
-        )
+        if shouldShowSideControls {
+            interactionState.updateScrollbarRevealProgress(
+                scrollbarRevealProgress(for: mouseLocation, scrollbarFrame: scrollbarPanel.frame)
+            )
+        } else {
+            interactionState.updateScrollbarRevealProgress(0)
+        }
 
         let overlayFrame = panel.frame
         interactionState.updateIsOverlayHovered(overlayFrame.contains(mouseLocation))
@@ -908,7 +977,9 @@ final class OverlayWindowController {
             return
         }
 
-        let interactiveFrames = [scrollbarPanel.frame] + leftControlButtonPanels.map(\.frame)
+        let interactiveFrames = shouldShowSideControls
+            ? [scrollbarPanel.frame] + leftControlButtonPanels.map(\.frame)
+            : []
         guard interactiveFrames.contains(where: { $0.contains(mouseLocation) }) == false else {
             interactionState.updatePassThroughBubble(nil)
             return
@@ -949,7 +1020,7 @@ final class OverlayWindowController {
     }
 
     private func overlayTrackingBounds() -> NSRect {
-        let trackedFrames = [panel.frame] + (leftControlPanels + [scrollbarPanel]).map(\.frame)
+        let trackedFrames = [panel.frame] + (shouldShowSideControls ? sideControlPanels.map(\.frame) : [])
 
         guard var trackingBounds = trackedFrames.first else {
             return .zero
@@ -1061,7 +1132,7 @@ final class OverlayWindowController {
             return
         }
 
-        let orderedPanels: [NSWindow] = [panel] + (leftControlPanels + [scrollbarPanel])
+        let orderedPanels: [NSWindow] = [panel] + (shouldShowSideControls ? sideControlPanels : [])
 
         for orderedPanel in orderedPanels {
             orderedPanel.order(.below, relativeTo: frontmostWindowNumber)

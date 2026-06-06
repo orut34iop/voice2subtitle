@@ -8,8 +8,13 @@ enum OverlayPanelMetrics {
 struct OverlayView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var interactionState: OverlayInteractionState
+    var onOverlayDragStart: () -> Void = {}
+    var onOverlayDragChanged: (CGSize) -> Void = { _ in }
+    var onOverlayDragEnded: () -> Void = {}
+
     @Namespace private var captionFlowNamespace
     @State private var isBackgroundVisible = false
+    @State private var isOverlayDragging = false
     @State private var renderedPassThroughBubble: OverlayPassThroughBubble?
     @State private var passThroughRevealProgress: Double = 0.0
     @State private var lastDraftSlotHeight: CGFloat = 0.0
@@ -23,6 +28,7 @@ struct OverlayView: View {
                 .mask(passThroughMask)
 
             passThroughBubble
+            overlayDragSurface
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -121,7 +127,7 @@ struct OverlayView: View {
                     }
                 }
                 .padding(.leading, 20)
-                .padding(.trailing, 20 + OverlayHistoryScrollbarLayout.panelWidth + OverlayHistoryScrollbarLayout.contentSpacing)
+                .padding(.trailing, subtitleTrailingPadding)
                 // Keep breathing room at the top, but let the live draft stack
                 // spend the full bottom edge budget when the window is shrunk.
                 .padding(.top, 12)
@@ -566,6 +572,14 @@ struct OverlayView: View {
         showsOriginalSubtitle && !showsTranslatedSubtitle
     }
 
+    private var subtitleTrailingPadding: CGFloat {
+        if case .running = model.sessionState {
+            return 20
+        }
+
+        return 20 + OverlayHistoryScrollbarLayout.panelWidth + OverlayHistoryScrollbarLayout.contentSpacing
+    }
+
     private var displayedSourceFontSize: Double {
         usesTranslatedTypographyForSourceText
             ? model.overlayStyle.scaledTranslatedFontSize
@@ -706,6 +720,25 @@ struct OverlayView: View {
                 .opacity(passThroughRevealProgress)
                 .allowsHitTesting(false)
         }
+    }
+
+    private var overlayDragSurface: some View {
+        OverlayDragHandle(
+            onDragStart: {
+                isOverlayDragging = true
+                onOverlayDragStart()
+            },
+            onDragChanged: onOverlayDragChanged,
+            onDragEnded: {
+                if isOverlayDragging {
+                    onOverlayDragEnded()
+                }
+                isOverlayDragging = false
+            }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .accessibilityHidden(true)
     }
 
     private var passThroughMask: some View {
