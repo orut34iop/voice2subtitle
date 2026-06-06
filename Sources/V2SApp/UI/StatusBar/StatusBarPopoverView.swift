@@ -191,9 +191,14 @@ struct StatusBarPopoverView: View {
             }
             VStack(spacing: 8) {
                 compactSlider(
-                    label: model.localized(.opacity),
+                    label: model.localized(.backgroundOpacity),
                     value: overlayOpacityBinding, in: 0.0 ... 1.0,
                     display: "\(Int((model.overlayStyle.backgroundOpacity * 100).rounded()))%"
+                )
+                compactSlider(
+                    label: model.localized(.fontOpacity),
+                    value: fontOpacityBinding, in: 0.0 ... 1.0,
+                    display: "\(Int((model.overlayStyle.fontOpacity * 100).rounded()))%"
                 )
                 compactSlider(
                     label: model.localized(.fontSize),
@@ -273,6 +278,12 @@ struct StatusBarPopoverView: View {
         Binding(
             get: { model.overlayStyle.backgroundOpacity },
             set: { v in model.updateOverlayStyle { $0.backgroundOpacity = v } }
+        )
+    }
+    private var fontOpacityBinding: Binding<Double> {
+        Binding(
+            get: { model.overlayStyle.fontOpacity },
+            set: { v in model.updateOverlayStyle { $0.fontOpacity = v } }
         )
     }
     private var translatedFontBinding: Binding<Double> {

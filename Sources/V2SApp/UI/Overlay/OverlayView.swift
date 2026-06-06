@@ -703,11 +703,11 @@ struct OverlayView: View {
     }
 
     private var baseTextOutlineColor: Color {
-        model.overlayStyle.textOutlineColor.color
+        model.overlayStyle.textOutlineColor.color.opacity(model.overlayStyle.fontOpacity)
     }
 
     private func subtitleColor(opacity: Double) -> Color {
-        baseSubtitleColor.opacity(opacity)
+        baseSubtitleColor.opacity(opacity * model.overlayStyle.fontOpacity)
     }
 
     @ViewBuilder

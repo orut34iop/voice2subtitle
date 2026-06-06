@@ -320,7 +320,15 @@ struct SettingsView: View {
                         title: model.localized(.backgroundOpacity),
                         value: backgroundOpacityBinding,
                         range: 0.16 ... 0.72,
-                        precision: 2
+                        precision: 2,
+                        displayText: "\(Int((model.overlayStyle.backgroundOpacity * 100).rounded()))%"
+                    )
+                    LabeledSlider(
+                        title: model.localized(.fontOpacity),
+                        value: fontOpacityBinding,
+                        range: 0.0 ... 1.0,
+                        precision: 2,
+                        displayText: "\(Int((model.overlayStyle.fontOpacity * 100).rounded()))%"
                     )
                     LabeledSlider(
                         title: model.localized(.translatedFont),
@@ -435,6 +443,10 @@ struct SettingsView: View {
 
     private var backgroundOpacityBinding: Binding<Double> {
         overlayBinding(\.backgroundOpacity)
+    }
+
+    private var fontOpacityBinding: Binding<Double> {
+        overlayBinding(\.fontOpacity)
     }
 
     private var subtitleColorBinding: Binding<Color> {
@@ -647,6 +659,21 @@ private struct LabeledSlider: View {
     let value: Binding<Double>
     let range: ClosedRange<Double>
     let precision: Int
+    let displayText: String?
+
+    init(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        precision: Int,
+        displayText: String? = nil
+    ) {
+        self.title = title
+        self.value = value
+        self.range = range
+        self.precision = precision
+        self.displayText = displayText
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -665,6 +692,10 @@ private struct LabeledSlider: View {
     }
 
     private var formattedValue: String {
-        String(format: "%.\(precision)f", value.wrappedValue)
+        if let displayText {
+            return displayText
+        }
+
+        return String(format: "%.\(precision)f", value.wrappedValue)
     }
 }

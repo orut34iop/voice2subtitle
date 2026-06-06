@@ -69,6 +69,7 @@ struct OverlayStyle: Codable, Equatable {
         case minWidth
         case maxWidth
         case backgroundOpacity
+        case fontOpacity
         case subtitleColor
         case backgroundColor
         case showsTextOutline = "usesWhiteTextOutline"
@@ -93,6 +94,7 @@ struct OverlayStyle: Codable, Equatable {
     var minWidth: Double
     var maxWidth: Double
     var backgroundOpacity: Double
+    var fontOpacity: Double
     var subtitleColor: OverlayColor
     var backgroundColor: OverlayColor
     var showsTextOutline: Bool
@@ -117,6 +119,7 @@ struct OverlayStyle: Codable, Equatable {
         minWidth: 720,
         maxWidth: 1440,
         backgroundOpacity: 0.32,
+        fontOpacity: 1.0,
         subtitleColor: .defaultSubtitle,
         backgroundColor: .defaultBackground,
         showsTextOutline: false,
@@ -138,6 +141,7 @@ struct OverlayStyle: Codable, Equatable {
         minWidth: Double,
         maxWidth: Double,
         backgroundOpacity: Double,
+        fontOpacity: Double = 1.0,
         subtitleColor: OverlayColor,
         backgroundColor: OverlayColor,
         showsTextOutline: Bool,
@@ -157,6 +161,7 @@ struct OverlayStyle: Codable, Equatable {
         self.minWidth = minWidth
         self.maxWidth = maxWidth
         self.backgroundOpacity = backgroundOpacity
+        self.fontOpacity = fontOpacity
         self.subtitleColor = subtitleColor
         self.backgroundColor = backgroundColor
         self.showsTextOutline = showsTextOutline
@@ -180,6 +185,7 @@ struct OverlayStyle: Codable, Equatable {
         minWidth           = try c.decode(Double.self, forKey: .minWidth)
         maxWidth           = try c.decode(Double.self, forKey: .maxWidth)
         backgroundOpacity  = try c.decode(Double.self, forKey: .backgroundOpacity)
+        fontOpacity        = try c.decodeIfPresent(Double.self, forKey: .fontOpacity) ?? 1.0
         subtitleColor      = try c.decodeIfPresent(OverlayColor.self, forKey: .subtitleColor)
             ?? .defaultSubtitle
         backgroundColor    = try c.decodeIfPresent(OverlayColor.self, forKey: .backgroundColor)

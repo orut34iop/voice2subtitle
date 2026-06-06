@@ -717,6 +717,7 @@ final class AppModel: ObservableObject {
     private static func normalizedOverlayStyle(_ style: OverlayStyle) -> OverlayStyle {
         var normalized = style
         normalized.translatedFirst = true
+        normalized.fontOpacity = min(max(normalized.fontOpacity, 0.0), 1.0)
         return normalized
     }
 

@@ -62,6 +62,7 @@ enum AppTextKey: String {
     case topInset
     case widthRatio
     case backgroundOpacity
+    case fontOpacity
     case translatedFont
     case sourceFont
     case overlay
@@ -349,6 +350,7 @@ enum AppLocalization {
             "topInset": "Top Inset",
             "widthRatio": "Width Ratio",
             "backgroundOpacity": "Background Opacity",
+            "fontOpacity": "Font Opacity",
             "translatedFont": "Translated Font",
             "sourceFont": "Source Font",
             "overlay": "Overlay",
@@ -516,6 +518,7 @@ enum AppLocalization {
             "topInset": "顶部边距",
             "widthRatio": "宽度比例",
             "backgroundOpacity": "背景透明度",
+            "fontOpacity": "字体透明度",
             "translatedFont": "译文字体",
             "sourceFont": "原文字体",
             "overlay": "浮层",
