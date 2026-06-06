@@ -52,6 +52,8 @@ enum AppTextKey: String {
     case textOutline
     case outlineColor
     case attachToSource
+    case alwaysOnTopInFullscreen
+    case alwaysOnTopInFullscreenHelp
     case subtitleColor
     case backgroundColor
     case resetColors
@@ -334,6 +336,8 @@ enum AppLocalization {
             "textOutline": "Text Outline",
             "outlineColor": "Outline Color",
             "attachToSource": "Attach to Source",
+            "alwaysOnTopInFullscreen": "Always on Top (including fullscreen)",
+            "alwaysOnTopInFullscreenHelp": "Keep subtitles above fullscreen apps and windows.",
             "subtitleColor": "Subtitle Color",
             "backgroundColor": "Background Color",
             "resetColors": "Reset Colors",
@@ -496,6 +500,8 @@ enum AppLocalization {
             "textOutline": "文字描边",
             "outlineColor": "描边颜色",
             "attachToSource": "附着到源应用",
+            "alwaysOnTopInFullscreen": "始终置顶（包含全屏）",
+            "alwaysOnTopInFullscreenHelp": "开启后字幕会始终显示在全屏窗口之上。",
             "subtitleColor": "字幕颜色",
             "backgroundColor": "背景颜色",
             "resetColors": "重置颜色",

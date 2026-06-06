@@ -174,6 +174,13 @@ struct StatusBarPopoverView: View {
                         .controlSize(.small)
                         .labelsHidden()
                 }
+                SettingsControlRow(label: model.localized(.alwaysOnTopInFullscreen)) {
+                    Toggle("", isOn: alwaysOnTopInFullscreenBinding)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                        .help(model.localized(.alwaysOnTopInFullscreenHelp))
+                }
             }
             VStack(spacing: 8) {
                 compactSlider(
@@ -277,6 +284,12 @@ struct StatusBarPopoverView: View {
         Binding(
             get: { model.overlayStyle.attachToSource },
             set: { v in model.updateOverlayStyle { $0.attachToSource = v } }
+        )
+    }
+    private var alwaysOnTopInFullscreenBinding: Binding<Bool> {
+        Binding(
+            get: { model.overlayStyle.alwaysOnTopInFullscreen },
+            set: { v in model.updateOverlayStyle { $0.alwaysOnTopInFullscreen = v } }
         )
     }
     private var sourceFontBinding: Binding<Double> {

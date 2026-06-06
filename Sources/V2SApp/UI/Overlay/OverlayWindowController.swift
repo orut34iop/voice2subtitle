@@ -170,13 +170,13 @@ final class OverlayWindowController {
     }
 
     private func configurePanels() {
-        configurePanel(panel, acceptsInput: false, level: .statusBar)
+        configurePanel(panel, acceptsInput: false, level: overlayHighContentLevel)
         panel.contentView = subtitleHostingView
 
-        configurePanel(controlsChromePanel, acceptsInput: false, level: .statusBar)
+        configurePanel(controlsChromePanel, acceptsInput: false, level: overlayHighContentLevel)
         controlsChromePanel.contentView = controlsChromeHostingView
 
-        let controlLevel = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+        let controlLevel = overlayHighControlLevel
         configurePanel(scrollbarPanel, acceptsInput: true, level: controlLevel)
         scrollbarPanel.contentView = scrollbarHostingView
 
@@ -199,6 +199,14 @@ final class OverlayWindowController {
 
     private var leftControlButtonPanels: [OverlayPanel] {
         [moveButtonPanel, resetSizeButtonPanel, closeButtonPanel, resizeButtonPanel]
+    }
+
+    private var overlayHighContentLevel: NSWindow.Level {
+        model.overlayStyle.alwaysOnTopInFullscreen ? .screenSaver : .statusBar
+    }
+
+    private var overlayHighControlLevel: NSWindow.Level {
+        NSWindow.Level(rawValue: overlayHighContentLevel.rawValue + 1)
     }
 
     private func configurePanel(_ panel: OverlayPanel, acceptsInput: Bool, level: NSWindow.Level) {
@@ -475,7 +483,7 @@ final class OverlayWindowController {
         )
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.level = .statusBar
+        window.level = overlayHighContentLevel
         window.hasShadow = false
         window.hidesOnDeactivate = false
         window.collectionBehavior = Self.panelCollectionBehavior
@@ -1009,9 +1017,9 @@ final class OverlayWindowController {
     private func updateAttachToSourceLevels() -> Bool {
         let useHighLevel = !model.overlayStyle.attachToSource || isSourceAppFrontmost()
         let presentationChanged = lastAttachToSourceUsesHighLevel != useHighLevel
-        let contentLevel: NSWindow.Level = useHighLevel ? .statusBar : .normal
+        let contentLevel: NSWindow.Level = useHighLevel ? overlayHighContentLevel : .normal
         let controlLevel: NSWindow.Level = useHighLevel
-            ? NSWindow.Level(rawValue: contentLevel.rawValue + 1)
+            ? overlayHighControlLevel
             : .normal
 
         let allContentPanels: [OverlayPanel] = [panel, controlsChromePanel]
@@ -1238,6 +1246,7 @@ private extension OverlayWindowController {
     static let scrollbarRevealDistance: CGFloat = 42
     static let panelCollectionBehavior: NSWindow.CollectionBehavior = [
         .fullScreenAuxiliary,
+        .canJoinAllSpaces,
         .ignoresCycle,
         .stationary
     ]

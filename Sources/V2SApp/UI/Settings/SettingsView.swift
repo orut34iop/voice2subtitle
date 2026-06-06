@@ -259,6 +259,13 @@ struct SettingsView: View {
                             .toggleStyle(.switch)
                             .labelsHidden()
                     }
+                    Divider()
+                    settingsRow(model.localized(.alwaysOnTopInFullscreen)) {
+                        Toggle("", isOn: overlayBinding(\.alwaysOnTopInFullscreen))
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .help(model.localized(.alwaysOnTopInFullscreenHelp))
+                    }
                 }
                 settingsCard {
                     sectionHeader(model.localized(.subtitleColor), icon: "paintpalette")
