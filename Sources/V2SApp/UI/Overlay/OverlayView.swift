@@ -573,7 +573,7 @@ struct OverlayView: View {
     }
 
     private var subtitleTrailingPadding: CGFloat {
-        if case .running = model.sessionState {
+        if case .running = model.sessionState, interactionState.isOverlayHovered == false {
             return 20
         }
 

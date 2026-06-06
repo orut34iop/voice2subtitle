@@ -38,6 +38,7 @@ final class OverlayWindowController {
     private var lastSourceWindowFrame: NSRect?
     private var attachToSourceRefreshTask: Task<Void, Never>?
     private var lastAttachToSourceUsesHighLevel: Bool?
+    private var sideControlsRevealedByHover = false
 
     // MARK: - Genie Animation State
     var trayIconRectProvider: (() -> NSRect?)?
@@ -212,12 +213,16 @@ final class OverlayWindowController {
         leftControlPanels + [scrollbarPanel]
     }
 
-    private var shouldShowSideControls: Bool {
+    private var isRunningSession: Bool {
         if case .running = model.sessionState {
-            return false
+            return true
         }
 
-        return true
+        return false
+    }
+
+    private var shouldShowSideControls: Bool {
+        isRunningSession == false || sideControlsRevealedByHover
     }
 
     private var overlayHighContentLevel: NSWindow.Level {
@@ -269,7 +274,15 @@ final class OverlayWindowController {
             .store(in: &cancellables)
 
         model.$sessionState
-            .sink { [weak self] _ in self?.scheduleWindowSync() }
+            .sink { [weak self] newState in
+                guard let self else { return }
+                if case .running = newState {
+                    self.sideControlsRevealedByHover = self.panel.frame.contains(NSEvent.mouseLocation)
+                } else {
+                    self.sideControlsRevealedByHover = false
+                }
+                self.scheduleWindowSync()
+            }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
@@ -595,6 +608,31 @@ final class OverlayWindowController {
         }
     }
 
+    private func updateSideControlsVisibility(animated: Bool = false) {
+        guard panelsShown, shouldShowSideControls else {
+            orderOutSideControls()
+            return
+        }
+
+        let controlsToReveal = sideControlPanels.filter { $0.isVisible == false || $0.alphaValue < 1 }
+        sideControlPanels.forEach { controlPanel in
+            controlPanel.orderFront(nil)
+            controlPanel.orderFrontRegardless()
+        }
+
+        guard animated, controlsToReveal.isEmpty == false else {
+            sideControlPanels.forEach { $0.alphaValue = 1 }
+            return
+        }
+
+        controlsToReveal.forEach { $0.alphaValue = 0 }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            controlsToReveal.forEach { $0.animator().alphaValue = 1 }
+        }
+    }
+
     // MARK: - Panel Ordering
 
     private func orderFrontAllPanels() {
@@ -622,10 +660,13 @@ final class OverlayWindowController {
     private func positionPanels(animated: Bool = false) {
         guard let screen = currentScreen() else { return }
 
-        let visibleFrame = screen.visibleFrame
+        let persistsUserDefinedPosition = userDefinedTopLeft != nil
+        let isUserPositioningOverlay = persistsUserDefinedPosition
+            || dragStartTopLeft != nil
+            || resizeDragStartTopLeft != nil
+        let visibleFrame = isUserPositioningOverlay ? screen.frame : screen.visibleFrame
         let style = model.overlayStyle
 
-        let persistsUserDefinedPosition = userDefinedTopLeft != nil
         var overlayFrame: NSRect
 
         // When attached to a source app, lock width & horizontal position to the source window
@@ -955,17 +996,20 @@ final class OverlayWindowController {
         }
 
         let mouseLocation = NSEvent.mouseLocation
+        let overlayFrame = panel.frame
+        let isOverlayHovered = overlayFrame.contains(mouseLocation)
+        interactionState.updateIsOverlayHovered(isOverlayHovered)
+        updateRuntimeSideControlReveal(for: mouseLocation, isOverlayHovered: isOverlayHovered)
         updateMouseTrackingMode(for: mouseLocation)
+
         if shouldShowSideControls {
-            interactionState.updateScrollbarRevealProgress(
-                scrollbarRevealProgress(for: mouseLocation, scrollbarFrame: scrollbarPanel.frame)
-            )
+            let revealProgress = isRunningSession
+                ? 1.0
+                : scrollbarRevealProgress(for: mouseLocation, scrollbarFrame: scrollbarPanel.frame)
+            interactionState.updateScrollbarRevealProgress(revealProgress)
         } else {
             interactionState.updateScrollbarRevealProgress(0)
         }
-
-        let overlayFrame = panel.frame
-        interactionState.updateIsOverlayHovered(overlayFrame.contains(mouseLocation))
 
         guard model.overlayStyle.clickThrough else {
             interactionState.updatePassThroughBubble(nil)
@@ -994,6 +1038,22 @@ final class OverlayWindowController {
                 diameter: Self.passThroughBubbleDiameter
             )
         )
+    }
+
+    private func updateRuntimeSideControlReveal(for mouseLocation: NSPoint, isOverlayHovered: Bool) {
+        guard isRunningSession else {
+            if sideControlsRevealedByHover {
+                sideControlsRevealedByHover = false
+            }
+            return
+        }
+
+        let isHoveringSideControls = sideControlPanels.contains { $0.frame.contains(mouseLocation) }
+        let shouldReveal = isOverlayHovered || isHoveringSideControls
+        guard shouldReveal != sideControlsRevealedByHover else { return }
+
+        sideControlsRevealedByHover = shouldReveal
+        updateSideControlsVisibility(animated: true)
     }
 
     private func updateMouseTrackingMode(for mouseLocation: NSPoint) {
