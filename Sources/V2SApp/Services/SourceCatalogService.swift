@@ -9,6 +9,10 @@ struct SourceCatalogSnapshot: Equatable {
 
 @MainActor
 final class SourceCatalogService {
+    private let nonCapturableApplicationBundleIDs: Set<String> = [
+        "com.apple.finder"
+    ]
+
     private let microphoneDiscoverySession = AVCaptureDevice.DiscoverySession(
         deviceTypes: [.microphone, .external],
         mediaType: .audio,
@@ -28,6 +32,7 @@ final class SourceCatalogService {
                 app.activationPolicy == .regular
                     && app.localizedName?.isEmpty == false
                     && app.bundleIdentifier != Bundle.main.bundleIdentifier
+                    && shouldOfferApplicationAudioSource(app)
             }
             .map { app in
                 InputSource(
@@ -40,6 +45,14 @@ final class SourceCatalogService {
 
         return deduplicated(runningApps)
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func shouldOfferApplicationAudioSource(_ app: NSRunningApplication) -> Bool {
+        guard let bundleIdentifier = app.bundleIdentifier else {
+            return true
+        }
+
+        return nonCapturableApplicationBundleIDs.contains(bundleIdentifier) == false
     }
 
     private func loadMicrophones() -> [InputSource] {

@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607052020"
+    static let buildNumber = "202607052028"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -494,8 +494,8 @@ final class AppModel: ObservableObject {
             selectedSourceIDs = retainedSelectedSourceIDs
         }
 
-        if selectedSourceIDs.isEmpty, let firstSourceID = availableSources.first?.id {
-            selectedSourceIDs = [firstSourceID]
+        if selectedSourceIDs.isEmpty, let defaultSourceID = preferredDefaultSourceID(in: snapshot) {
+            selectedSourceIDs = [defaultSourceID]
         }
 
         let primarySourceID = preferredPrimarySourceID(for: selectedSourceIDs)
@@ -757,38 +757,44 @@ final class AppModel: ObservableObject {
         return orderedSourceIDs + remainingSourceIDs
     }
 
+    private func preferredDefaultSourceID(in snapshot: SourceCatalogSnapshot) -> String? {
+        snapshot.microphones.first?.id ?? snapshot.applications.first?.id
+    }
+
     private func selectedResourcePreparationRequirements() -> (
         speechLanguageIDs: [String],
         translationPairs: [LanguagePairRequirement]
     ) {
         let selectedSources = self.selectedSources
         guard selectedSources.isEmpty == false else {
-            let translationPairs = inputLanguageID == outputLanguageID
-                ? []
-                : [LanguagePairRequirement(sourceLanguageID: inputLanguageID, targetLanguageID: outputLanguageID)]
+            let translationPairs = showsTranslatedSubtitle && inputLanguageID != outputLanguageID
+                ? [LanguagePairRequirement(sourceLanguageID: inputLanguageID, targetLanguageID: outputLanguageID)]
+                : []
             return ([inputLanguageID], translationPairs)
         }
 
         let speechLanguageIDs = Set(selectedSources.map { languageID(for: $0) }).sorted()
-        let translationPairs = Set(
-            selectedSources.compactMap { source -> LanguagePairRequirement? in
-                let sourceLanguageID = languageID(for: source)
-                let targetLanguageID = outputLanguageIDForSource(source)
-                guard sourceLanguageID != targetLanguageID else {
-                    return nil
+        let translationPairs = showsTranslatedSubtitle
+            ? Set(
+                selectedSources.compactMap { source -> LanguagePairRequirement? in
+                    let sourceLanguageID = languageID(for: source)
+                    let targetLanguageID = outputLanguageIDForSource(source)
+                    guard sourceLanguageID != targetLanguageID else {
+                        return nil
+                    }
+                    return LanguagePairRequirement(
+                        sourceLanguageID: sourceLanguageID,
+                        targetLanguageID: targetLanguageID
+                    )
                 }
-                return LanguagePairRequirement(
-                    sourceLanguageID: sourceLanguageID,
-                    targetLanguageID: targetLanguageID
-                )
+            )
+            .sorted {
+                if $0.sourceLanguageID == $1.sourceLanguageID {
+                    return $0.targetLanguageID < $1.targetLanguageID
+                }
+                return $0.sourceLanguageID < $1.sourceLanguageID
             }
-        )
-        .sorted {
-            if $0.sourceLanguageID == $1.sourceLanguageID {
-                return $0.targetLanguageID < $1.targetLanguageID
-            }
-            return $0.sourceLanguageID < $1.sourceLanguageID
-        }
+            : []
 
         return (speechLanguageIDs, translationPairs)
     }
