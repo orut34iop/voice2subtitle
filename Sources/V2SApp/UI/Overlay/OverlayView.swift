@@ -410,10 +410,6 @@ struct OverlayView: View {
         for state: OverlayPreviewState,
         draftText: String
     ) -> String? {
-        if model.shouldReserveDraftTranslationSlot && showsOriginalSubtitle == false {
-            return draftText
-        }
-
         guard let draftTranslated = state.visibleDraftTranslatedText(
             for: draftText,
             promotionID: state.draftPromotionID
@@ -545,7 +541,10 @@ struct OverlayView: View {
     /// usesSourceAsTranslationFallback
     /// Returns true when a translated slot should show source text while translation is pending.
     private func usesSourceAsTranslationFallback(translated: String, source: String) -> Bool {
-        showsTranslatedSubtitle && translated.isEmpty && source.isEmpty == false
+        showsTranslatedSubtitle
+            && showsOriginalSubtitle
+            && translated.isEmpty
+            && source.isEmpty == false
     }
 
     private var showsOriginalSubtitle: Bool {
