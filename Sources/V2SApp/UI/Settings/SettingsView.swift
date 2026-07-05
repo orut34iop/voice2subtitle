@@ -732,6 +732,7 @@ private struct ModelResourceRow: View {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .controlSize(.small)
+                    .frame(maxWidth: .infinity)
                 Text("\(Int((progress * 100).rounded()))%")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -739,6 +740,7 @@ private struct ModelResourceRow: View {
                 ProgressView()
                     .progressViewStyle(.linear)
                     .controlSize(.small)
+                    .frame(maxWidth: .infinity)
             }
         }
         .padding(.vertical, 4)

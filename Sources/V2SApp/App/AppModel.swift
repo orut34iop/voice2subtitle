@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607051953"
+    static let buildNumber = "202607052020"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -1295,12 +1295,14 @@ final class AppModel: ObservableObject {
             return
         }
 
-        modelResources[index] = modelResources[index].updating(
+        var updatedResources = modelResources
+        updatedResources[index] = updatedResources[index].updating(
             detail: detail,
             state: state,
             progress: progress,
             availableActions: availableActions
         )
+        modelResources = updatedResources
     }
 
     private func sortedModelResources(_ resources: [ModelResourceItem]) -> [ModelResourceItem] {
