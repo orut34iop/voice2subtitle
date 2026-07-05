@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607052028"
+    static let buildNumber = "202607052034"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -233,14 +233,18 @@ final class AppModel: ObservableObject {
     }
 
     var selectedSourceDisplayName: String {
-        let names = selectedSources.map(\.name)
+        sourceDisplayName(for: selectedSources)
+    }
+
+    private func sourceDisplayName(for sources: [InputSource]) -> String {
+        let names = sources.map(\.name)
         switch names.count {
         case 0:
             return localized(.selectedSource)
         case 1:
             return names[0]
         default:
-            if selectedSources.count == allSources.count, allSources.isEmpty == false {
+            if sources.count == allSources.count, allSources.isEmpty == false {
                 return localized(.allSources)
             }
             return AppLocalization.multipleSourcesText(
@@ -561,12 +565,16 @@ final class AppModel: ObservableObject {
         let config = ModeConfig.config(for: subtitleMode)
         let recognitionHints = recognitionContextualStrings()
         var startedSessions: [LiveTranscriptionSession] = []
+        var startedSources: [InputSource] = []
+        var startErrors: [(source: InputSource, message: String)] = []
+        var attemptedMicrophoneFallback = false
 
-        do {
-            for source in selectedSources {
-                let sourceLanguageID = languageID(for: source)
-                let targetLanguageID = outputLanguageIDForSource(source)
-                let session = LiveTranscriptionSession()
+        func startSource(_ source: InputSource) async {
+            let sourceLanguageID = languageID(for: source)
+            let targetLanguageID = outputLanguageIDForSource(source)
+            let session = LiveTranscriptionSession()
+
+            do {
                 try await session.start(
                     source: source,
                     localeIdentifier: LanguageCatalog.speechLocaleIdentifier(for: sourceLanguageID),
@@ -600,14 +608,25 @@ final class AppModel: ObservableObject {
                     }
                 )
                 startedSessions.append(session)
+                startedSources.append(source)
+            } catch {
+                session.stop()
+                startErrors.append((source: source, message: localizedErrorDescription(error)))
             }
+        }
 
-            liveTranscriptionSessions = startedSessions
-            liveTranscriptionSession = startedSessions.first
+        for source in selectedSources {
+            await startSource(source)
+        }
 
-            sessionState = .running
-            setStatus(.running(sourceName: selectedSourceName))
-        } catch {
+        if startedSessions.isEmpty,
+           selectedSources.allSatisfy({ $0.category == .application }),
+           let fallbackSource = microphoneSources.first {
+            attemptedMicrophoneFallback = true
+            await startSource(fallbackSource)
+        }
+
+        guard startedSessions.isEmpty == false else {
             for session in startedSessions {
                 session.stop()
             }
@@ -620,7 +639,9 @@ final class AppModel: ObservableObject {
                 targetLanguageID: previousTranscriptOutputLanguageID
             )
             sessionState = .error
-            let localizedError = localizedErrorDescription(error)
+            let localizedError = (
+                attemptedMicrophoneFallback ? startErrors.last?.message : startErrors.first?.message
+            ) ?? unableToStartText
             setStatus(.custom(localizedError))
             overlayState = OverlayPreviewState(
                 translatedText: unableToStartText,
@@ -628,6 +649,22 @@ final class AppModel: ObservableObject {
                 sourceName: selectedSourceName
             )
             overlayHistoryScrollOffset = 0
+            return
+        }
+
+        liveTranscriptionSessions = startedSessions
+        liveTranscriptionSession = startedSessions.first
+
+        let startedSourceName = sourceDisplayName(for: startedSources)
+        sessionState = .running
+        setStatus(.running(sourceName: startedSourceName))
+
+        if startedSourceName != selectedSourceName {
+            overlayState = OverlayPreviewState(
+                translatedText: listeningPlaceholderText,
+                sourceText: localized(.waitingForAudioFromFormat, startedSourceName),
+                sourceName: startedSourceName
+            )
         }
     }
 
