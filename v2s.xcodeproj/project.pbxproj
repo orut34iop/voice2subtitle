@@ -46,6 +46,7 @@
 		A0000000000000000000008C /* QuickSettingsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008D /* QuickSettingsControls.swift */; };
 		A0000000000000000000008E /* PopoverOutsideClickMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008F /* PopoverOutsideClickMonitor.swift */; };
 		A00000000000000000000090 /* SentenceBoundaryHeuristics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000091 /* SentenceBoundaryHeuristics.swift */; };
+		A00000000000000000000092 /* ModelResource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000093 /* ModelResource.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -88,6 +89,7 @@
 		A0000000000000000000008D /* QuickSettingsControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickSettingsControls.swift; sourceTree = "<group>"; };
 		A0000000000000000000008F /* PopoverOutsideClickMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverOutsideClickMonitor.swift; sourceTree = "<group>"; };
 		A00000000000000000000091 /* SentenceBoundaryHeuristics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceBoundaryHeuristics.swift; sourceTree = "<group>"; };
+		A00000000000000000000093 /* ModelResource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelResource.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -175,6 +177,7 @@
 				A00000000000000000000033 /* AppSettings.swift */,
 				A00000000000000000000034 /* InputSource.swift */,
 				A00000000000000000000035 /* LanguageOption.swift */,
+				A00000000000000000000093 /* ModelResource.swift */,
 				A00000000000000000000042 /* ModeConfig.swift */,
 				A00000000000000000000036 /* OverlayPreviewState.swift */,
 				A00000000000000000000037 /* OverlayStyle.swift */,
@@ -366,6 +369,7 @@
 				A00000000000000000000053 /* AppSettings.swift in Sources */,
 				A00000000000000000000054 /* InputSource.swift in Sources */,
 				A00000000000000000000055 /* LanguageOption.swift in Sources */,
+				A00000000000000000000092 /* ModelResource.swift in Sources */,
 				A00000000000000000000063 /* ModeConfig.swift in Sources */,
 				A00000000000000000000056 /* OverlayPreviewState.swift in Sources */,
 				A00000000000000000000057 /* OverlayStyle.swift in Sources */,
@@ -434,7 +438,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202607051628;
+				CURRENT_PROJECT_VERSION = 202607051953;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;
@@ -463,7 +467,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202607051628;
+				CURRENT_PROJECT_VERSION = 202607051953;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;

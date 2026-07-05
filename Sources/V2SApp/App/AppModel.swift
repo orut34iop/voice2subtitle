@@ -4,10 +4,13 @@ import AppKit
 import Speech
 import SwiftUI
 import Translation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607051628"
+    static let buildNumber = "202607051953"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -34,6 +37,8 @@ final class AppModel: ObservableObject {
     private var draftClearTask: Task<Void, Never>?
     private var committedCaptionArchiveTask: Task<Void, Never>?
     private var languageResourcePreparationTask: Task<Void, Never>?
+    private var modelResourceRefreshTask: Task<Void, Never>?
+    private var modelResourceDownloadTasks: [String: Task<Void, Never>] = [:]
     private var activeDraftSourceLanguageID: String?
     private var activeDraftTargetLanguageID: String?
     private var lastDraftSourceID: String?
@@ -58,6 +63,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var statusMessage = ""
     @Published private(set) var overlayState: OverlayPreviewState?
     @Published private(set) var languageResourceStatuses: [LanguageResourceStatus] = []
+    @Published private(set) var modelResources: [ModelResourceItem] = []
     @Published private(set) var translationHostConfiguration: TranslationSession.Configuration?
     @Published private(set) var transcriptEntries: [TranscriptEntry] = []
     @Published private(set) var transcriptGeneration: Int = 0
@@ -794,6 +800,534 @@ final class AppModel: ObservableObject {
 
     func refreshLanguageResources() {
         scheduleSelectedLanguageResourcePreparation()
+    }
+
+    func refreshModelResourcesIfNeeded() {
+        if modelResources.isEmpty {
+            refreshModelResources()
+        }
+    }
+
+    func refreshModelResources() {
+        modelResourceRefreshTask?.cancel()
+        modelResources = checkingModelResourceItems()
+
+        modelResourceRefreshTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            let resources = await self.loadModelResources()
+            guard Task.isCancelled == false else {
+                return
+            }
+
+            self.modelResources = self.sortedModelResources(resources)
+            self.modelResourceRefreshTask = nil
+        }
+    }
+
+    func performModelResourceAction(_ action: ModelResourceAction, for item: ModelResourceItem) {
+        guard item.availableActions.contains(action) else {
+            return
+        }
+
+        switch action {
+        case .download:
+            startModelResourceDownload(item)
+        case .pause:
+            pauseModelResourceDownload(item)
+        case .openSystemSettings:
+            openSystemSettings(for: systemSettingsDestination(for: item))
+        }
+    }
+
+    private func checkingModelResourceItems() -> [ModelResourceItem] {
+        let supportedLanguageIDs = Set(
+            (LanguageCatalog.speechInput + LanguageCatalog.common)
+                .map { ModelResourceCatalog.normalizedLanguageID($0.id) }
+        )
+        let descriptors = speechModelResourceDescriptors()
+            + translationModelResourceDescriptors(supportedLanguageIDs: supportedLanguageIDs)
+            + [foundationModelResourceDescriptor()]
+
+        return sortedModelResources(
+            descriptors.map { descriptor in
+                if let activeItem = activeModelResourceItem(for: descriptor.id) {
+                    return activeItem
+                }
+
+                return modelResourceItem(
+                    for: descriptor,
+                    detail: localized(.modelResourceCheckingDetail),
+                    state: .checking
+                )
+            }
+        )
+    }
+
+    private func loadModelResources() async -> [ModelResourceItem] {
+        var resources: [ModelResourceItem] = []
+
+        for descriptor in speechModelResourceDescriptors() {
+            resources.append(await speechModelResourceItem(for: descriptor))
+        }
+
+        let supportedTranslationLanguageIDs = await supportedTranslationLanguageIDs()
+        for descriptor in translationModelResourceDescriptors(
+            supportedLanguageIDs: supportedTranslationLanguageIDs
+        ) {
+            resources.append(await translationModelResourceItem(for: descriptor))
+        }
+
+        resources.append(foundationModelResourceItem())
+        return resources
+    }
+
+    private func speechModelResourceDescriptors() -> [ModelResourceDescriptor] {
+        ModelResourceCatalog.speechDescriptors(
+            options: LanguageCatalog.speechInput,
+            localizedName: languageName(for:)
+        )
+    }
+
+    private func translationModelResourceDescriptors(
+        supportedLanguageIDs: Set<String>
+    ) -> [ModelResourceDescriptor] {
+        ModelResourceCatalog.translationDescriptors(
+            sourceOptions: LanguageCatalog.speechInput,
+            targetOptions: LanguageCatalog.common,
+            supportedLanguageIDs: supportedLanguageIDs,
+            localizedName: languageName(for:)
+        )
+    }
+
+    private func foundationModelResourceDescriptor() -> ModelResourceDescriptor {
+        ModelResourceCatalog.foundationModelDescriptor(
+            title: localized(.modelResourceFoundationTitle)
+        )
+    }
+
+    private func activeModelResourceItem(for id: String) -> ModelResourceItem? {
+        guard modelResourceDownloadTasks[id] != nil else {
+            return nil
+        }
+
+        return modelResources.first(where: { $0.id == id })
+    }
+
+    private func speechModelResourceItem(
+        for descriptor: ModelResourceDescriptor
+    ) async -> ModelResourceItem {
+        if let activeItem = activeModelResourceItem(for: descriptor.id) {
+            return activeItem
+        }
+
+        guard #available(macOS 26.0, *) else {
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceSpeechRequiresMacOS26),
+                state: .unsupported
+            )
+        }
+
+        guard let languageID = descriptor.sourceLanguageID else {
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceUnavailableDetail),
+                state: .error
+            )
+        }
+
+        let requestedLocale = Locale(identifier: LanguageCatalog.speechLocaleIdentifier(for: languageID))
+        guard let resolvedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.speechNotAvailableOnMacOS),
+                state: .unsupported
+            )
+        }
+
+        let transcriber = makeSpeechTranscriber(locale: resolvedLocale)
+        switch await AssetInventory.status(forModules: [transcriber]) {
+        case .installed:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceSpeechInstalledDetail),
+                state: .installed
+            )
+        case .supported:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceSpeechDownloadableDetail),
+                state: .downloadable
+            )
+        case .downloading:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceSpeechSystemDownloadingDetail),
+                state: .downloading
+            )
+        case .unsupported:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.speechResourcesNotSupportedOnMacOS),
+                state: .unsupported
+            )
+        @unknown default:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceUnavailableDetail),
+                state: .error
+            )
+        }
+    }
+
+    private func supportedTranslationLanguageIDs() async -> Set<String> {
+        guard #available(macOS 15.0, *) else {
+            return []
+        }
+
+        let availability = LanguageAvailability()
+        let languages = await availability.supportedLanguages
+        return Set(languages.map {
+            ModelResourceCatalog.normalizedLanguageID($0.minimalIdentifier)
+        })
+    }
+
+    private func translationModelResourceItem(
+        for descriptor: ModelResourceDescriptor
+    ) async -> ModelResourceItem {
+        if let activeItem = activeModelResourceItem(for: descriptor.id) {
+            return activeItem
+        }
+
+        guard #available(macOS 15.0, *),
+              let sourceLanguageID = descriptor.sourceLanguageID,
+              let targetLanguageID = descriptor.targetLanguageID else {
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.translationRequiresMacOS15OrNewer),
+                state: .unsupported
+            )
+        }
+
+        switch await translationAvailabilityStatus(from: sourceLanguageID, to: targetLanguageID) {
+        case .installed:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceTranslationInstalledDetail),
+                state: .installed
+            )
+        case .supported:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceTranslationDownloadableDetail),
+                state: .downloadable
+            )
+        case .unsupported:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.translationNotSupportedPairOnMacOS),
+                state: .unsupported
+            )
+        @unknown default:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceUnavailableDetail),
+                state: .error
+            )
+        }
+    }
+
+    private func foundationModelResourceItem() -> ModelResourceItem {
+        let descriptor = foundationModelResourceDescriptor()
+
+        guard #available(macOS 26.0, *) else {
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceFoundationRequiresMacOS26),
+                state: .unsupported
+            )
+        }
+
+#if canImport(FoundationModels)
+        switch SystemLanguageModel.default.availability {
+        case .available:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceFoundationAvailableDetail),
+                state: .installed
+            )
+        case .unavailable(let reason):
+            switch reason {
+            case .deviceNotEligible:
+                return modelResourceItem(
+                    for: descriptor,
+                    detail: localized(.modelResourceFoundationDeviceNotEligibleDetail),
+                    state: .unsupported
+                )
+            case .appleIntelligenceNotEnabled:
+                return modelResourceItem(
+                    for: descriptor,
+                    detail: localized(.modelResourceFoundationAppleIntelligenceOffDetail),
+                    state: .systemManaged
+                )
+            case .modelNotReady:
+                return modelResourceItem(
+                    for: descriptor,
+                    detail: localized(.modelResourceFoundationModelNotReadyDetail),
+                    state: .systemManaged
+                )
+            @unknown default:
+                return modelResourceItem(
+                    for: descriptor,
+                    detail: localized(.modelResourceUnavailableDetail),
+                    state: .systemManaged
+                )
+            }
+        @unknown default:
+            return modelResourceItem(
+                for: descriptor,
+                detail: localized(.modelResourceUnavailableDetail),
+                state: .systemManaged
+            )
+        }
+#else
+        return modelResourceItem(
+            for: descriptor,
+            detail: localized(.modelResourceFoundationRequiresMacOS26),
+            state: .unsupported
+        )
+#endif
+    }
+
+    private func startModelResourceDownload(_ item: ModelResourceItem) {
+        switch item.kind {
+        case .speech:
+            startSpeechModelResourceDownload(item)
+        case .translation:
+            startTranslationModelResourceDownload(item)
+        case .foundationModel:
+            openSystemSettings(for: .appleIntelligence)
+        }
+    }
+
+    private func startSpeechModelResourceDownload(_ item: ModelResourceItem) {
+        guard let languageID = item.sourceLanguageID,
+              modelResourceDownloadTasks[item.id] == nil else {
+            return
+        }
+
+        updateModelResource(
+            id: item.id,
+            detail: localized(.modelResourceSpeechDownloadingDetail),
+            state: .downloading,
+            availableActions: [.pause]
+        )
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                if #available(macOS 26.0, *) {
+                    try await self.downloadSpeechModelResource(languageID: languageID, resourceID: item.id)
+                } else {
+                    throw LanguageResourcePreparationError.unsupportedSpeechLanguage
+                }
+                self.modelResourceDownloadTasks.removeValue(forKey: item.id)
+                self.refreshModelResources()
+            } catch is CancellationError {
+                self.modelResourceDownloadTasks.removeValue(forKey: item.id)
+                self.refreshModelResources()
+            } catch {
+                self.modelResourceDownloadTasks.removeValue(forKey: item.id)
+                self.updateModelResource(
+                    id: item.id,
+                    detail: self.localizedErrorDescription(error),
+                    state: .error
+                )
+            }
+        }
+
+        modelResourceDownloadTasks[item.id] = task
+    }
+
+    @available(macOS 26.0, *)
+    private func downloadSpeechModelResource(
+        languageID: String,
+        resourceID: String
+    ) async throws {
+        let requestedLocale = Locale(identifier: LanguageCatalog.speechLocaleIdentifier(for: languageID))
+        guard let resolvedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
+            throw LanguageResourcePreparationError.unsupportedSpeechLanguage
+        }
+
+        let transcriber = makeSpeechTranscriber(locale: resolvedLocale)
+        if await AssetInventory.status(forModules: [transcriber]) == .installed {
+            return
+        }
+
+        guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
+            return
+        }
+
+        let progressTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            while Task.isCancelled == false {
+                self.updateModelResource(
+                    id: resourceID,
+                    detail: self.localized(.modelResourceSpeechDownloadingDetail),
+                    state: .downloading,
+                    progress: self.normalizedProgressValue(request.progress.fractionCompleted),
+                    availableActions: [.pause]
+                )
+
+                do {
+                    try await Task.sleep(nanoseconds: 120_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+
+        defer { progressTask.cancel() }
+        try await request.downloadAndInstall()
+        try Task.checkCancellation()
+    }
+
+    private func startTranslationModelResourceDownload(_ item: ModelResourceItem) {
+        guard let sourceLanguageID = item.sourceLanguageID,
+              let targetLanguageID = item.targetLanguageID,
+              modelResourceDownloadTasks[item.id] == nil else {
+            return
+        }
+
+        updateModelResource(
+            id: item.id,
+            detail: localized(.modelResourceTranslationPreparingDetail),
+            state: .downloading,
+            availableActions: [.openSystemSettings]
+        )
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                try await self.prepareTranslationResourceWithTimeout(
+                    from: sourceLanguageID,
+                    to: targetLanguageID
+                )
+                self.modelResourceDownloadTasks.removeValue(forKey: item.id)
+                self.refreshModelResources()
+            } catch is CancellationError {
+                self.modelResourceDownloadTasks.removeValue(forKey: item.id)
+                self.refreshModelResources()
+            } catch {
+                self.modelResourceDownloadTasks.removeValue(forKey: item.id)
+                self.updateModelResource(
+                    id: item.id,
+                    detail: self.localizedErrorDescription(error),
+                    state: .error
+                )
+            }
+        }
+
+        modelResourceDownloadTasks[item.id] = task
+    }
+
+    private func pauseModelResourceDownload(_ item: ModelResourceItem) {
+        modelResourceDownloadTasks[item.id]?.cancel()
+        modelResourceDownloadTasks.removeValue(forKey: item.id)
+        refreshModelResources()
+    }
+
+    private func modelResourceItem(
+        for descriptor: ModelResourceDescriptor,
+        detail: String,
+        state: ModelResourceState,
+        progress: Double? = nil,
+        availableActions: Set<ModelResourceAction>? = nil
+    ) -> ModelResourceItem {
+        ModelResourceItem(
+            id: descriptor.id,
+            kind: descriptor.kind,
+            title: title(for: descriptor),
+            detail: detail,
+            state: state,
+            progress: progress,
+            availableActions: availableActions ?? ModelResourceItem.availableActions(
+                for: descriptor.kind,
+                state: state,
+                isUserInitiatedDownload: modelResourceDownloadTasks[descriptor.id] != nil
+            ),
+            sourceLanguageID: descriptor.sourceLanguageID,
+            targetLanguageID: descriptor.targetLanguageID
+        )
+    }
+
+    private func title(for descriptor: ModelResourceDescriptor) -> String {
+        switch descriptor.kind {
+        case .speech:
+            return localized(.modelResourceSpeechTitleFormat, descriptor.title)
+        case .translation:
+            return localized(.modelResourceTranslationTitleFormat, descriptor.title)
+        case .foundationModel:
+            return descriptor.title
+        }
+    }
+
+    private func updateModelResource(
+        id: String,
+        detail: String,
+        state: ModelResourceState,
+        progress: Double? = nil,
+        availableActions: Set<ModelResourceAction>? = nil
+    ) {
+        guard let index = modelResources.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        modelResources[index] = modelResources[index].updating(
+            detail: detail,
+            state: state,
+            progress: progress,
+            availableActions: availableActions
+        )
+    }
+
+    private func sortedModelResources(_ resources: [ModelResourceItem]) -> [ModelResourceItem] {
+        resources.sorted { lhs, rhs in
+            if lhs.kind.rawValue == rhs.kind.rawValue {
+                let titleComparison = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if titleComparison == .orderedSame {
+                    return lhs.id < rhs.id
+                }
+                return titleComparison == .orderedAscending
+            }
+
+            return lhs.kind.rawValue < rhs.kind.rawValue
+        }
+    }
+
+    private func systemSettingsDestination(
+        for item: ModelResourceItem
+    ) -> LanguageResourceSystemSettingsDestination {
+        switch item.kind {
+        case .speech:
+            return .keyboard
+        case .translation:
+            return .translationLanguages
+        case .foundationModel:
+            return .appleIntelligence
+        }
     }
 
     private func scheduleSelectedLanguageResourcePreparation(
@@ -2987,6 +3521,7 @@ private enum LanguageResourcePreparationError: LocalizedError, AppLocalizableErr
 private enum LanguageResourceSystemSettingsDestination: Hashable {
     case keyboard
     case translationLanguages
+    case appleIntelligence
 
     var urlString: String {
         switch self {
@@ -2994,6 +3529,8 @@ private enum LanguageResourceSystemSettingsDestination: Hashable {
             return "x-apple.systempreferences:com.apple.Keyboard-Settings.extension"
         case .translationLanguages:
             return "x-apple.systempreferences:com.apple.Localization-Settings.extension"
+        case .appleIntelligence:
+            return "x-apple.systempreferences:com.apple.Siri-Settings.extension"
         }
     }
 }

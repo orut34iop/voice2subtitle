@@ -21,6 +21,8 @@ struct SettingsView: View {
                     .tabItem { Label(model.localized(.subtitleOverlay), systemImage: "rectangle.on.rectangle") }
                 glossaryTab
                     .tabItem { Label(model.localized(.glossary), systemImage: "text.book.closed") }
+                dataManagementTab
+                    .tabItem { Label(model.localized(.dataManagement), systemImage: "internaldrive") }
             }
         }
         .frame(minWidth: 520, minHeight: 480)
@@ -397,6 +399,51 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Data Management Tab
+
+    private var dataManagementTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                settingsCard {
+                    sectionHeader(model.localized(.dataManagement), icon: "internaldrive")
+                    Text(model.localized(.dataManagementDescription))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    SecondaryRefreshButton(
+                        title: model.localized(.refreshDataManagement),
+                        action: model.refreshModelResources
+                    )
+                }
+
+                ForEach(ModelResourceKind.allCases, id: \.self) { kind in
+                    let resources = model.modelResources.filter { $0.kind == kind }
+                    if resources.isEmpty == false {
+                        settingsCard {
+                            sectionHeader(
+                                modelResourceSectionTitle(for: kind),
+                                icon: modelResourceSectionIcon(for: kind)
+                            )
+                            ForEach(Array(resources.enumerated()), id: \.element.id) { index, item in
+                                if index > 0 {
+                                    Divider()
+                                }
+                                ModelResourceRow(model: model, item: item)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .onAppear {
+            model.refreshModelResourcesIfNeeded()
+        }
+        .onChange(of: model.interfaceLanguageID) { _, _ in
+            model.refreshModelResources()
+        }
+    }
+
     // MARK: - Layout helpers
 
     private func sectionHeader(_ title: String, icon: String) -> some View {
@@ -568,6 +615,28 @@ struct SettingsView: View {
             }
         )
     }
+
+    private func modelResourceSectionTitle(for kind: ModelResourceKind) -> String {
+        switch kind {
+        case .speech:
+            return model.localized(.modelResourceSpeechSection)
+        case .translation:
+            return model.localized(.modelResourceTranslationSection)
+        case .foundationModel:
+            return model.localized(.modelResourceFoundationSection)
+        }
+    }
+
+    private func modelResourceSectionIcon(for kind: ModelResourceKind) -> String {
+        switch kind {
+        case .speech:
+            return "waveform"
+        case .translation:
+            return "translate"
+        case .foundationModel:
+            return "sparkles"
+        }
+    }
 }
 
 struct LanguageResourceStatusListView: View {
@@ -613,6 +682,150 @@ struct LanguageResourceStatusListView: View {
                 .padding(10)
                 .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
             }
+        }
+    }
+}
+
+private struct ModelResourceRow: View {
+    @ObservedObject var model: AppModel
+    let item: ModelResourceItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: kindIcon)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(item.title)
+                            .font(.callout.weight(.medium))
+                            .lineLimit(2)
+                        stateBadge
+                    }
+
+                    Text(item.detail)
+                        .font(.caption)
+                        .foregroundStyle(item.state == .error ? .red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                HStack(spacing: 6) {
+                    ForEach(sortedActions, id: \.self) { action in
+                        Button {
+                            model.performModelResourceAction(action, for: item)
+                        } label: {
+                            Image(systemName: icon(for: action))
+                                .frame(width: 18, height: 18)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(title(for: action))
+                    }
+                }
+                .frame(minWidth: 0, alignment: .trailing)
+            }
+
+            if let progress = item.progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                Text("\(Int((progress * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            } else if item.state == .downloading {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var sortedActions: [ModelResourceAction] {
+        ModelResourceAction.allCases.filter { item.availableActions.contains($0) }
+    }
+
+    private var kindIcon: String {
+        switch item.kind {
+        case .speech:
+            return "waveform"
+        case .translation:
+            return "translate"
+        case .foundationModel:
+            return "sparkles"
+        }
+    }
+
+    private var stateBadge: some View {
+        Text(title(for: item.state))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color(for: item.state))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color(for: item.state).opacity(0.12), in: Capsule())
+            .lineLimit(1)
+    }
+
+    private func title(for state: ModelResourceState) -> String {
+        switch state {
+        case .checking:
+            return model.localized(.modelResourceStateChecking)
+        case .downloadable:
+            return model.localized(.modelResourceStateDownloadable)
+        case .downloading:
+            return model.localized(.modelResourceStateDownloading)
+        case .installed:
+            return model.localized(.modelResourceStateInstalled)
+        case .systemManaged:
+            return model.localized(.modelResourceStateSystemManaged)
+        case .unsupported:
+            return model.localized(.modelResourceStateUnsupported)
+        case .error:
+            return model.localized(.modelResourceStateError)
+        }
+    }
+
+    private func color(for state: ModelResourceState) -> Color {
+        switch state {
+        case .checking:
+            return .secondary
+        case .downloadable:
+            return .blue
+        case .downloading:
+            return .orange
+        case .installed:
+            return .green
+        case .systemManaged:
+            return .purple
+        case .unsupported:
+            return .secondary
+        case .error:
+            return .red
+        }
+    }
+
+    private func icon(for action: ModelResourceAction) -> String {
+        switch action {
+        case .download:
+            return "arrow.down.circle"
+        case .pause:
+            return "pause.circle"
+        case .openSystemSettings:
+            return "gearshape"
+        }
+    }
+
+    private func title(for action: ModelResourceAction) -> String {
+        switch action {
+        case .download:
+            return model.localized(.modelResourceActionDownload)
+        case .pause:
+            return model.localized(.modelResourceActionPause)
+        case .openSystemSettings:
+            return model.localized(.modelResourceActionOpenSystemSettings)
         }
     }
 }
