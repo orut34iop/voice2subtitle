@@ -736,7 +736,7 @@ private struct ModelResourceRow: View {
                 Text("\(Int((progress * 100).rounded()))%")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-            } else if item.state == .downloading {
+            } else if item.showsIndeterminateProgress {
                 ProgressView()
                     .progressViewStyle(.linear)
                     .controlSize(.small)

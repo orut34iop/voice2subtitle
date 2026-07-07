@@ -98,4 +98,36 @@ final class ModelResourceTests: XCTestCase {
             []
         )
     }
+
+    func testTranslationDownloadsDoNotShowFakeProgressBars() {
+        let translationDownload = ModelResourceItem(
+            id: "translation:de->zh-Hans",
+            kind: .translation,
+            title: "Translation · de -> zh-Hans",
+            detail: "Downloading",
+            state: .downloading,
+            progress: nil,
+            availableActions: [.openSystemSettings],
+            sourceLanguageID: "de",
+            targetLanguageID: "zh-Hans"
+        )
+
+        XCTAssertFalse(translationDownload.showsIndeterminateProgress)
+    }
+
+    func testSpeechDownloadsCanShowIndeterminateProgressWhenProgressIsUnavailable() {
+        let speechDownload = ModelResourceItem(
+            id: "speech:yue",
+            kind: .speech,
+            title: "Speech · Cantonese",
+            detail: "Downloading",
+            state: .downloading,
+            progress: nil,
+            availableActions: [.pause],
+            sourceLanguageID: "yue",
+            targetLanguageID: nil
+        )
+
+        XCTAssertTrue(speechDownload.showsIndeterminateProgress)
+    }
 }

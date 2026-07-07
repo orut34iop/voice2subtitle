@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607070905"
+    static let buildNumber = "202607070913"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -914,9 +914,10 @@ final class AppModel: ObservableObject {
 
     private func loadModelResources() async -> [ModelResourceItem] {
         var resources: [ModelResourceItem] = []
+        let speechInventory = await speechModelResourceInventory()
 
         for descriptor in speechModelResourceDescriptors() {
-            resources.append(await speechModelResourceItem(for: descriptor))
+            resources.append(await speechModelResourceItem(for: descriptor, inventory: speechInventory))
         }
 
         let supportedTranslationLanguageIDs = await supportedTranslationLanguageIDs()
@@ -962,8 +963,30 @@ final class AppModel: ObservableObject {
         return modelResources.first(where: { $0.id == id })
     }
 
+    private func speechModelResourceInventory() async -> SpeechModelResourceInventory? {
+        guard #available(macOS 26.0, *) else {
+            return nil
+        }
+
+        async let supportedLocales = SpeechTranscriber.supportedLocales
+        async let installedLocales = SpeechTranscriber.installedLocales
+
+        let supportedLocaleIDs = Set((await supportedLocales).map {
+            canonicalLocaleIdentifier($0.identifier)
+        })
+        let installedLocaleIDs = Set((await installedLocales).map {
+            canonicalLocaleIdentifier($0.identifier)
+        })
+
+        return SpeechModelResourceInventory(
+            supportedLocaleIDs: supportedLocaleIDs,
+            installedLocaleIDs: installedLocaleIDs
+        )
+    }
+
     private func speechModelResourceItem(
-        for descriptor: ModelResourceDescriptor
+        for descriptor: ModelResourceDescriptor,
+        inventory: SpeechModelResourceInventory?
     ) async -> ModelResourceItem {
         if let activeItem = activeModelResourceItem(for: descriptor.id) {
             return activeItem
@@ -977,7 +1000,8 @@ final class AppModel: ObservableObject {
             )
         }
 
-        guard let languageID = descriptor.sourceLanguageID else {
+        guard let languageID = descriptor.sourceLanguageID,
+              let inventory else {
             return modelResourceItem(
                 for: descriptor,
                 detail: localized(.modelResourceUnavailableDetail),
@@ -985,8 +1009,8 @@ final class AppModel: ObservableObject {
             )
         }
 
-        let requestedLocale = Locale(identifier: LanguageCatalog.speechLocaleIdentifier(for: languageID))
-        guard let resolvedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
+        let localeID = canonicalLocaleIdentifier(LanguageCatalog.speechLocaleIdentifier(for: languageID))
+        guard inventory.supportedLocaleIDs.contains(localeID) else {
             return modelResourceItem(
                 for: descriptor,
                 detail: localized(.speechNotAvailableOnMacOS),
@@ -994,39 +1018,19 @@ final class AppModel: ObservableObject {
             )
         }
 
-        let transcriber = makeSpeechTranscriber(locale: resolvedLocale)
-        switch await AssetInventory.status(forModules: [transcriber]) {
-        case .installed:
+        if inventory.installedLocaleIDs.contains(localeID) {
             return modelResourceItem(
                 for: descriptor,
                 detail: localized(.modelResourceSpeechInstalledDetail),
                 state: .installed
             )
-        case .supported:
-            return modelResourceItem(
-                for: descriptor,
-                detail: localized(.modelResourceSpeechDownloadableDetail),
-                state: .downloadable
-            )
-        case .downloading:
-            return modelResourceItem(
-                for: descriptor,
-                detail: localized(.modelResourceSpeechSystemDownloadingDetail),
-                state: .downloading
-            )
-        case .unsupported:
-            return modelResourceItem(
-                for: descriptor,
-                detail: localized(.speechResourcesNotSupportedOnMacOS),
-                state: .unsupported
-            )
-        @unknown default:
-            return modelResourceItem(
-                for: descriptor,
-                detail: localized(.modelResourceUnavailableDetail),
-                state: .error
-            )
         }
+
+        return modelResourceItem(
+            for: descriptor,
+            detail: localized(.modelResourceSpeechDownloadableDetail),
+            state: .downloadable
+        )
     }
 
     private func supportedTranslationLanguageIDs() async -> Set<String> {
@@ -1961,6 +1965,10 @@ final class AppModel: ObservableObject {
         }
 
         return min(max(fractionCompleted, 0), 1)
+    }
+
+    private func canonicalLocaleIdentifier(_ identifier: String) -> String {
+        Locale(identifier: identifier).identifier.replacingOccurrences(of: "_", with: "-")
     }
 
     private func translationAvailabilityStatus(
@@ -3672,6 +3680,11 @@ struct LanguageResourceStatus: Identifiable, Equatable {
     let detail: String
     let progress: Double?
     let isError: Bool
+}
+
+private struct SpeechModelResourceInventory {
+    let supportedLocaleIDs: Set<String>
+    let installedLocaleIDs: Set<String>
 }
 
 @MainActor

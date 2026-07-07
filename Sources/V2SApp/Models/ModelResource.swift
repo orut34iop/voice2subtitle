@@ -33,6 +33,10 @@ struct ModelResourceItem: Identifiable, Equatable {
     let sourceLanguageID: String?
     let targetLanguageID: String?
 
+    var showsIndeterminateProgress: Bool {
+        progress == nil && state == .downloading && kind == .speech
+    }
+
     func updating(
         detail: String,
         state: ModelResourceState,
