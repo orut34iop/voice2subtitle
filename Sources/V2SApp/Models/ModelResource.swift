@@ -10,6 +10,7 @@ enum ModelResourceState: String {
     case checking
     case downloadable
     case downloading
+    case removing
     case installed
     case systemManaged
     case unsupported
@@ -67,7 +68,7 @@ struct ModelResourceItem: Identifiable, Equatable {
         isUserInitiatedDownload: Bool
     ) -> Set<ModelResourceAction> {
         switch state {
-        case .checking, .unsupported:
+        case .checking, .removing, .unsupported:
             return []
         case .installed:
             return [.remove]

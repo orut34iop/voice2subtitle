@@ -58,6 +58,9 @@ enum AppTextKey: String {
     case modelResourceSpeechInstalledDetail
     case modelResourceSpeechDownloadingDetail
     case modelResourceSpeechSystemDownloadingDetail
+    case modelResourceSpeechRemovingDetail
+    case modelResourceSpeechReleaseStartedDetail
+    case modelResourceSpeechReleaseUnavailableDetail
     case modelResourceSpeechRequiresMacOS26
     case modelResourceTranslationDownloadableDetail
     case modelResourceTranslationInstalledDetail
@@ -70,6 +73,7 @@ enum AppTextKey: String {
     case modelResourceStateChecking
     case modelResourceStateDownloadable
     case modelResourceStateDownloading
+    case modelResourceStateRemoving
     case modelResourceStateInstalled
     case modelResourceStateSystemManaged
     case modelResourceStateUnsupported
@@ -78,6 +82,8 @@ enum AppTextKey: String {
     case modelResourceActionPause
     case modelResourceActionRemove
     case modelResourceActionOpenSystemSettings
+    case modelResourceSystemSettingsOpenedDetail
+    case modelResourceSystemSettingsOpenFailedDetail
     case glossary
     case glossaryEmpty
     case sourceTerm
@@ -381,6 +387,9 @@ enum AppLocalization {
             "modelResourceSpeechInstalledDetail": "Installed and ready for local speech recognition.",
             "modelResourceSpeechDownloadingDetail": "Downloading speech recognition resources...",
             "modelResourceSpeechSystemDownloadingDetail": "macOS is already downloading this speech resource.",
+            "modelResourceSpeechRemovingDetail": "Releasing this speech resource from v2s...",
+            "modelResourceSpeechReleaseStartedDetail": "Released from v2s. macOS may remove the shared speech assets later.",
+            "modelResourceSpeechReleaseUnavailableDetail": "This speech resource is managed by macOS. Open Dictation settings to remove or manage it.",
             "modelResourceSpeechRequiresMacOS26": "Speech model management requires macOS 26 or newer.",
             "modelResourceTranslationDownloadableDetail": "Available to download. macOS manages approval and installation.",
             "modelResourceTranslationInstalledDetail": "Installed and ready for on-device translation.",
@@ -393,14 +402,17 @@ enum AppLocalization {
             "modelResourceStateChecking": "Checking",
             "modelResourceStateDownloadable": "Downloadable",
             "modelResourceStateDownloading": "Downloading",
+            "modelResourceStateRemoving": "Removing",
             "modelResourceStateInstalled": "Installed",
             "modelResourceStateSystemManaged": "System",
             "modelResourceStateUnsupported": "Unsupported",
             "modelResourceStateError": "Error",
             "modelResourceActionDownload": "Download",
             "modelResourceActionPause": "Pause",
-            "modelResourceActionRemove": "Remove in System Settings",
+            "modelResourceActionRemove": "Remove or Manage",
             "modelResourceActionOpenSystemSettings": "Open System Settings",
+            "modelResourceSystemSettingsOpenedDetail": "Opened System Settings. Use the macOS controls there to remove or manage this resource.",
+            "modelResourceSystemSettingsOpenFailedDetail": "Could not open System Settings. Open it manually to remove or manage this resource.",
             "glossary": "Glossary",
             "glossaryEmpty": "No terms added. Use + to add source -> target term pairs.",
             "sourceTerm": "Source term",
@@ -584,6 +596,9 @@ enum AppLocalization {
             "modelResourceSpeechInstalledDetail": "已安装，可用于本地语音识别。",
             "modelResourceSpeechDownloadingDetail": "正在下载语音识别资源...",
             "modelResourceSpeechSystemDownloadingDetail": "macOS 已在下载此语音资源。",
+            "modelResourceSpeechRemovingDetail": "正在释放 v2s 使用的语音资源...",
+            "modelResourceSpeechReleaseStartedDetail": "已从 v2s 释放。macOS 可能稍后移除共享语音资源。",
+            "modelResourceSpeechReleaseUnavailableDetail": "此语音资源由 macOS 管理。请在“听写”设置中移除或管理。",
             "modelResourceSpeechRequiresMacOS26": "语音模型管理需要 macOS 26 或更高版本。",
             "modelResourceTranslationDownloadableDetail": "可下载。macOS 会管理授权和安装。",
             "modelResourceTranslationInstalledDetail": "已安装，可用于设备端翻译。",
@@ -596,14 +611,17 @@ enum AppLocalization {
             "modelResourceStateChecking": "检查中",
             "modelResourceStateDownloadable": "可下载",
             "modelResourceStateDownloading": "下载中",
+            "modelResourceStateRemoving": "移除中",
             "modelResourceStateInstalled": "已安装",
             "modelResourceStateSystemManaged": "系统管理",
             "modelResourceStateUnsupported": "不支持",
             "modelResourceStateError": "错误",
             "modelResourceActionDownload": "下载",
             "modelResourceActionPause": "暂停",
-            "modelResourceActionRemove": "删除/管理",
+            "modelResourceActionRemove": "删除或管理",
             "modelResourceActionOpenSystemSettings": "打开系统设置",
+            "modelResourceSystemSettingsOpenedDetail": "已打开系统设置。请在那里使用 macOS 控件移除或管理此资源。",
+            "modelResourceSystemSettingsOpenFailedDetail": "无法打开系统设置。请手动打开系统设置移除或管理此资源。",
             "glossary": "术语表",
             "glossaryEmpty": "还没有添加术语。点击 + 添加源词 -> 目标词条目。",
             "sourceTerm": "源词",

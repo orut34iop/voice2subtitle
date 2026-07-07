@@ -92,6 +92,14 @@ final class ModelResourceTests: XCTestCase {
         XCTAssertEqual(
             ModelResourceItem.availableActions(
                 for: .speech,
+                state: .removing,
+                isUserInitiatedDownload: false
+            ),
+            []
+        )
+        XCTAssertEqual(
+            ModelResourceItem.availableActions(
+                for: .speech,
                 state: .installed,
                 isUserInitiatedDownload: false
             ),

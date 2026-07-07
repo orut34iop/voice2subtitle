@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607070918"
+    static let buildNumber = "202607070949"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -19,6 +19,8 @@ private enum AppBuildInfo {
 final class AppModel: ObservableObject {
     private static let translationModelResourcePollingIntervalNanoseconds: UInt64 = 2_000_000_000
     private static let translationModelResourceMonitoringTimeout: TimeInterval = 30 * 60
+    private static let externalModelResourceRefreshIntervalNanoseconds: UInt64 = 2_000_000_000
+    private static let externalModelResourceRefreshDuration: TimeInterval = 5 * 60
 
     private let settingsStore: SettingsStore
     private let sourceCatalogService: SourceCatalogService
@@ -42,6 +44,10 @@ final class AppModel: ObservableObject {
     private var languageResourcePreparationTask: Task<Void, Never>?
     private var modelResourceRefreshTask: Task<Void, Never>?
     private var modelResourceDownloadTasks: [String: Task<Void, Never>] = [:]
+    private var modelResourceRemovalTasks: [String: Task<Void, Never>] = [:]
+    private var externalModelResourceRefreshTask: Task<Void, Never>?
+    private var lifecycleCancellables = Set<AnyCancellable>()
+    private var releasedSpeechResourceIDs: Set<String> = []
     private var activeDraftSourceLanguageID: String?
     private var activeDraftTargetLanguageID: String?
     private var lastDraftSourceID: String?
@@ -196,12 +202,20 @@ final class AppModel: ObservableObject {
         self.subtitleMode = settings.subtitleMode
         self.subtitleDisplayMode = settings.subtitleDisplayMode
         self.glossary = settings.glossary
+        self.releasedSpeechResourceIDs = Set(settings.releasedSpeechResourceIDs)
         self.translationHostConfiguration = nil
         AppLocalization.updateEmbeddedBundleLocalizationLanguageID(self.interfaceLanguageID)
 
         translationCoordinator.onConfigurationChange = { [weak self] configuration in
             self?.translationHostConfiguration = configuration
         }
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshModelResourcesAfterExternalChange()
+                }
+            }
+            .store(in: &lifecycleCancellables)
 
         isBootstrapping = false
         applyStatusMessage()
@@ -209,6 +223,14 @@ final class AppModel: ObservableObject {
             persistSettings()
         }
         refreshSources()
+    }
+
+    deinit {
+        languageResourcePreparationTask?.cancel()
+        modelResourceRefreshTask?.cancel()
+        modelResourceDownloadTasks.values.forEach { $0.cancel() }
+        modelResourceRemovalTasks.values.forEach { $0.cancel() }
+        externalModelResourceRefreshTask?.cancel()
     }
 
     convenience init() {
@@ -754,7 +776,8 @@ final class AppModel: ObservableObject {
             overlayStyle: overlayStyle,
             subtitleMode: subtitleMode,
             subtitleDisplayMode: subtitleDisplayMode,
-            glossary: glossary
+            glossary: glossary,
+            releasedSpeechResourceIDs: releasedSpeechResourceIDs.sorted()
         )
 
         settingsStore.save(settings)
@@ -855,8 +878,14 @@ final class AppModel: ObservableObject {
     }
 
     func refreshModelResources() {
+        refreshModelResources(showCheckingState: true)
+    }
+
+    private func refreshModelResources(showCheckingState: Bool) {
         modelResourceRefreshTask?.cancel()
-        modelResources = checkingModelResourceItems()
+        if showCheckingState {
+            modelResources = checkingModelResourceItems()
+        }
 
         modelResourceRefreshTask = Task { @MainActor [weak self] in
             guard let self else {
@@ -873,6 +902,41 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func refreshModelResourcesAfterExternalChange() {
+        guard modelResources.isEmpty == false,
+              modelResourceRefreshTask == nil else {
+            return
+        }
+
+        refreshModelResources(showCheckingState: false)
+    }
+
+    private func startExternalModelResourceRefreshMonitor() {
+        guard modelResources.isEmpty == false else {
+            return
+        }
+
+        externalModelResourceRefreshTask?.cancel()
+        let deadline = Date().addingTimeInterval(Self.externalModelResourceRefreshDuration)
+        externalModelResourceRefreshTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            while Task.isCancelled == false, Date() < deadline {
+                do {
+                    try await Task.sleep(nanoseconds: Self.externalModelResourceRefreshIntervalNanoseconds)
+                } catch {
+                    return
+                }
+
+                self.refreshModelResourcesAfterExternalChange()
+            }
+
+            self.externalModelResourceRefreshTask = nil
+        }
+    }
+
     func performModelResourceAction(_ action: ModelResourceAction, for item: ModelResourceItem) {
         guard item.availableActions.contains(action) else {
             return
@@ -884,9 +948,9 @@ final class AppModel: ObservableObject {
         case .pause:
             pauseModelResourceDownload(item)
         case .remove:
-            openSystemSettings(for: systemSettingsDestination(for: item))
+            startModelResourceRemoval(item)
         case .openSystemSettings:
-            openSystemSettings(for: systemSettingsDestination(for: item))
+            openModelResourceSettings(for: item)
         }
     }
 
@@ -958,7 +1022,7 @@ final class AppModel: ObservableObject {
     }
 
     private func activeModelResourceItem(for id: String) -> ModelResourceItem? {
-        guard modelResourceDownloadTasks[id] != nil else {
+        guard modelResourceDownloadTasks[id] != nil || modelResourceRemovalTasks[id] != nil else {
             return nil
         }
 
@@ -972,6 +1036,7 @@ final class AppModel: ObservableObject {
 
         async let supportedLocales = SpeechTranscriber.supportedLocales
         async let installedLocales = SpeechTranscriber.installedLocales
+        async let reservedLocales = AssetInventory.reservedLocales
 
         let supportedLocaleIDs = Set((await supportedLocales).map {
             canonicalLocaleIdentifier($0.identifier)
@@ -979,10 +1044,14 @@ final class AppModel: ObservableObject {
         let installedLocaleIDs = Set((await installedLocales).map {
             canonicalLocaleIdentifier($0.identifier)
         })
+        let reservedLocaleIDs = Set((await reservedLocales).map {
+            canonicalLocaleIdentifier($0.identifier)
+        })
 
         return SpeechModelResourceInventory(
             supportedLocaleIDs: supportedLocaleIDs,
-            installedLocaleIDs: installedLocaleIDs
+            installedLocaleIDs: installedLocaleIDs,
+            reservedLocaleIDs: reservedLocaleIDs
         )
     }
 
@@ -1021,6 +1090,17 @@ final class AppModel: ObservableObject {
         }
 
         if inventory.installedLocaleIDs.contains(localeID) {
+            if inventory.reservedLocaleIDs.contains(localeID) {
+                clearReleasedSpeechResourceID(descriptor.id)
+            } else if releasedSpeechResourceIDs.contains(descriptor.id) {
+                return modelResourceItem(
+                    for: descriptor,
+                    detail: localized(.modelResourceSpeechReleaseStartedDetail),
+                    state: .systemManaged,
+                    availableActions: [.openSystemSettings]
+                )
+            }
+
             return modelResourceItem(
                 for: descriptor,
                 detail: localized(.modelResourceSpeechInstalledDetail),
@@ -1028,6 +1108,7 @@ final class AppModel: ObservableObject {
             )
         }
 
+        clearReleasedSpeechResourceID(descriptor.id)
         return modelResourceItem(
             for: descriptor,
             detail: localized(.modelResourceSpeechDownloadableDetail),
@@ -1171,6 +1252,7 @@ final class AppModel: ObservableObject {
             return
         }
 
+        clearReleasedSpeechResourceID(item.id)
         updateModelResource(
             id: item.id,
             detail: localized(.modelResourceSpeechDownloadingDetail),
@@ -1372,6 +1454,122 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func startModelResourceRemoval(_ item: ModelResourceItem) {
+        switch item.kind {
+        case .speech:
+            startSpeechModelResourceRemoval(item)
+        case .translation, .foundationModel:
+            openSystemManagedRemovalSettings(for: item)
+        }
+    }
+
+    private func startSpeechModelResourceRemoval(_ item: ModelResourceItem) {
+        guard let languageID = item.sourceLanguageID,
+              modelResourceRemovalTasks[item.id] == nil else {
+            return
+        }
+
+        guard #available(macOS 26.0, *) else {
+            openSystemManagedRemovalSettings(for: item)
+            return
+        }
+
+        updateModelResource(
+            id: item.id,
+            detail: localized(.modelResourceSpeechRemovingDetail),
+            state: .removing,
+            availableActions: []
+        )
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                let released = try await self.releaseSpeechModelResource(languageID: languageID)
+                self.modelResourceRemovalTasks.removeValue(forKey: item.id)
+
+                if released {
+                    self.markSpeechResourceIDReleased(item.id)
+                    self.updateModelResource(
+                        id: item.id,
+                        detail: self.localized(.modelResourceSpeechReleaseStartedDetail),
+                        state: .systemManaged,
+                        availableActions: [.openSystemSettings]
+                    )
+                    self.refreshModelResources()
+                } else {
+                    let opened = self.openSystemSettings(for: .dictation)
+                    self.updateModelResource(
+                        id: item.id,
+                        detail: self.localized(
+                            opened
+                                ? .modelResourceSpeechReleaseUnavailableDetail
+                                : .modelResourceSystemSettingsOpenFailedDetail
+                        ),
+                        state: .systemManaged,
+                        availableActions: [.openSystemSettings]
+                    )
+                }
+            } catch {
+                self.modelResourceRemovalTasks.removeValue(forKey: item.id)
+                self.updateModelResource(
+                    id: item.id,
+                    detail: self.localizedErrorDescription(error),
+                    state: .error
+                )
+            }
+        }
+
+        modelResourceRemovalTasks[item.id] = task
+    }
+
+    @available(macOS 26.0, *)
+    private func releaseSpeechModelResource(languageID: String) async throws -> Bool {
+        let requestedLocale = Locale(identifier: LanguageCatalog.speechLocaleIdentifier(for: languageID))
+        guard let resolvedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
+            throw LanguageResourcePreparationError.unsupportedSpeechLanguage
+        }
+
+        let resolvedLocaleID = canonicalLocaleIdentifier(resolvedLocale.identifier)
+        let reservedLocales = await AssetInventory.reservedLocales
+        let reservedLocale = reservedLocales.first {
+            canonicalLocaleIdentifier($0.identifier) == resolvedLocaleID
+        }
+
+        guard let reservedLocale else {
+            return false
+        }
+
+        return await AssetInventory.release(reservedLocale: reservedLocale)
+    }
+
+    private func openModelResourceSettings(for item: ModelResourceItem) {
+        guard openSystemSettings(for: systemSettingsDestination(for: item)) == false else {
+            return
+        }
+
+        updateModelResource(
+            id: item.id,
+            detail: localized(.modelResourceSystemSettingsOpenFailedDetail),
+            state: item.state,
+            availableActions: item.availableActions
+        )
+    }
+
+    @discardableResult
+    private func openSystemManagedRemovalSettings(for item: ModelResourceItem) -> Bool {
+        let opened = openSystemSettings(for: systemSettingsDestination(for: item))
+        updateModelResource(
+            id: item.id,
+            detail: localized(opened ? .modelResourceSystemSettingsOpenedDetail : .modelResourceSystemSettingsOpenFailedDetail),
+            state: .systemManaged,
+            availableActions: [.openSystemSettings]
+        )
+        return opened
+    }
+
     private func pauseModelResourceDownload(_ item: ModelResourceItem) {
         modelResourceDownloadTasks[item.id]?.cancel()
         modelResourceDownloadTasks.removeValue(forKey: item.id)
@@ -1434,6 +1632,22 @@ final class AppModel: ObservableObject {
         modelResources = updatedResources
     }
 
+    private func markSpeechResourceIDReleased(_ id: String) {
+        guard releasedSpeechResourceIDs.insert(id).inserted else {
+            return
+        }
+
+        persistSettings()
+    }
+
+    private func clearReleasedSpeechResourceID(_ id: String) {
+        guard releasedSpeechResourceIDs.remove(id) != nil else {
+            return
+        }
+
+        persistSettings()
+    }
+
     private func sortedModelResources(_ resources: [ModelResourceItem]) -> [ModelResourceItem] {
         resources.sorted { lhs, rhs in
             if lhs.kind.rawValue == rhs.kind.rawValue {
@@ -1453,7 +1667,7 @@ final class AppModel: ObservableObject {
     ) -> LanguageResourceSystemSettingsDestination {
         switch item.kind {
         case .speech:
-            return .keyboard
+            return .dictation
         case .translation:
             return .translationLanguages
         case .foundationModel:
@@ -2006,14 +2220,34 @@ final class AppModel: ObservableObject {
         languageResourceStatuses.removeAll { $0.id == id }
     }
 
-    private func openSystemSettings(for destination: LanguageResourceSystemSettingsDestination) {
+    @discardableResult
+    private func openSystemSettings(for destination: LanguageResourceSystemSettingsDestination) -> Bool {
         guard let url = URL(string: destination.urlString) else {
-            return
+            return false
         }
 
-        if NSWorkspace.shared.open(url) == false,
-           let fallbackURL = URL(string: "x-apple.systempreferences:") {
-            _ = NSWorkspace.shared.open(fallbackURL)
+        if NSWorkspace.shared.open(url) {
+            activateSystemSettings()
+            startExternalModelResourceRefreshMonitor()
+            return true
+        }
+
+        guard let fallbackURL = URL(string: "x-apple.systempreferences:"),
+              NSWorkspace.shared.open(fallbackURL) else {
+            return false
+        }
+
+        activateSystemSettings()
+        startExternalModelResourceRefreshMonitor()
+        return true
+    }
+
+    private func activateSystemSettings() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSRunningApplication
+                .runningApplications(withBundleIdentifier: "com.apple.systempreferences")
+                .first?
+                .activate(options: [.activateAllWindows])
         }
     }
 
@@ -3654,16 +3888,16 @@ private enum LanguageResourcePreparationError: LocalizedError, AppLocalizableErr
 }
 
 private enum LanguageResourceSystemSettingsDestination: Hashable {
-    case keyboard
+    case dictation
     case translationLanguages
     case appleIntelligence
 
     var urlString: String {
         switch self {
-        case .keyboard:
-            return "x-apple.systempreferences:com.apple.Keyboard-Settings.extension"
+        case .dictation:
+            return "x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Dictation"
         case .translationLanguages:
-            return "x-apple.systempreferences:com.apple.Localization-Settings.extension"
+            return "x-apple.systempreferences:com.apple.Localization-Settings.extension?translation"
         case .appleIntelligence:
             return "x-apple.systempreferences:com.apple.Siri-Settings.extension"
         }
@@ -3687,6 +3921,7 @@ struct LanguageResourceStatus: Identifiable, Equatable {
 private struct SpeechModelResourceInventory {
     let supportedLocaleIDs: Set<String>
     let installedLocaleIDs: Set<String>
+    let reservedLocaleIDs: Set<String>
 }
 
 @MainActor

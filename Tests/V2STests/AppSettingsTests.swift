@@ -33,6 +33,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.selectedSourceIDs, ["mic-1"])
         XCTAssertTrue(settings.sourceLanguageOverrides.isEmpty)
         XCTAssertTrue(settings.sourceOutputLanguageOverrides.isEmpty)
+        XCTAssertTrue(settings.releasedSpeechResourceIDs.isEmpty)
     }
 
     func testMultiSourceSettingsRoundTripPreservesOverrides() throws {
@@ -47,7 +48,8 @@ final class AppSettingsTests: XCTestCase {
             overlayStyle: .default,
             subtitleMode: .balanced,
             subtitleDisplayMode: .both,
-            glossary: ["CEO": "Chief Executive Officer"]
+            glossary: ["CEO": "Chief Executive Officer"],
+            releasedSpeechResourceIDs: ["speech:ja", "speech:en"]
         )
 
         let data = try JSONEncoder().encode(settings)
@@ -64,5 +66,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.outputLanguageID, "ja")
         XCTAssertEqual(decoded.interfaceLanguageID, "en")
         XCTAssertEqual(decoded.glossary, ["CEO": "Chief Executive Officer"])
+        XCTAssertEqual(decoded.releasedSpeechResourceIDs, ["speech:ja", "speech:en"])
     }
 }

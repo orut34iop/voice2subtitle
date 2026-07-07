@@ -722,6 +722,7 @@ private struct ModelResourceRow: View {
                                 .frame(width: 18, height: 18)
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel(title(for: action))
                         .help(title(for: action))
                     }
                 }
@@ -779,6 +780,8 @@ private struct ModelResourceRow: View {
             return model.localized(.modelResourceStateDownloadable)
         case .downloading:
             return model.localized(.modelResourceStateDownloading)
+        case .removing:
+            return model.localized(.modelResourceStateRemoving)
         case .installed:
             return model.localized(.modelResourceStateInstalled)
         case .systemManaged:
@@ -797,6 +800,8 @@ private struct ModelResourceRow: View {
         case .downloadable:
             return .blue
         case .downloading:
+            return .orange
+        case .removing:
             return .orange
         case .installed:
             return .green
