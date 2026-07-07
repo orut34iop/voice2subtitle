@@ -10,13 +10,16 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607052049"
+    static let buildNumber = "202607070905"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
 
 @MainActor
 final class AppModel: ObservableObject {
+    private static let translationModelResourcePollingIntervalNanoseconds: UInt64 = 2_000_000_000
+    private static let translationModelResourceMonitoringTimeout: TimeInterval = 30 * 60
+
     private let settingsStore: SettingsStore
     private let sourceCatalogService: SourceCatalogService
     private let translationCoordinator = TranslationCoordinator()
@@ -1264,9 +1267,10 @@ final class AppModel: ObservableObject {
             }
 
             do {
-                try await self.prepareTranslationResourceWithTimeout(
+                try await self.downloadTranslationModelResource(
                     from: sourceLanguageID,
-                    to: targetLanguageID
+                    to: targetLanguageID,
+                    resourceID: item.id
                 )
                 self.modelResourceDownloadTasks.removeValue(forKey: item.id)
                 self.refreshModelResources()
@@ -1284,6 +1288,82 @@ final class AppModel: ObservableObject {
         }
 
         modelResourceDownloadTasks[item.id] = task
+    }
+
+    private func downloadTranslationModelResource(
+        from sourceLanguageID: String,
+        to targetLanguageID: String,
+        resourceID: String
+    ) async throws {
+        try Task.checkCancellation()
+
+        if await translationAvailabilityStatus(from: sourceLanguageID, to: targetLanguageID) == .installed {
+            return
+        }
+
+        do {
+            try await prepareTranslationResourceWithTimeout(
+                from: sourceLanguageID,
+                to: targetLanguageID
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let refreshedStatus = await translationAvailabilityStatus(
+                from: sourceLanguageID,
+                to: targetLanguageID
+            )
+            guard refreshedStatus != .unsupported else {
+                throw error
+            }
+        }
+
+        try await monitorTranslationModelResourceInstallation(
+            from: sourceLanguageID,
+            to: targetLanguageID,
+            resourceID: resourceID
+        )
+    }
+
+    private func monitorTranslationModelResourceInstallation(
+        from sourceLanguageID: String,
+        to targetLanguageID: String,
+        resourceID: String
+    ) async throws {
+        let deadline = Date().addingTimeInterval(Self.translationModelResourceMonitoringTimeout)
+
+        while true {
+            try Task.checkCancellation()
+
+            switch await translationAvailabilityStatus(from: sourceLanguageID, to: targetLanguageID) {
+            case .installed:
+                return
+            case .unsupported:
+                throw TranslationCoordinator.ServiceError.unsupportedPair(sourceLanguageID, targetLanguageID)
+            case .supported:
+                updateModelResource(
+                    id: resourceID,
+                    detail: localized(.downloadingTranslationResources),
+                    state: .downloading,
+                    progress: nil,
+                    availableActions: [.openSystemSettings]
+                )
+            @unknown default:
+                updateModelResource(
+                    id: resourceID,
+                    detail: localized(.waitingTranslationResourcesInstalling),
+                    state: .downloading,
+                    progress: nil,
+                    availableActions: [.openSystemSettings]
+                )
+            }
+
+            guard Date() < deadline else {
+                throw LanguageResourcePreparationError.translationDownloadTimedOut
+            }
+
+            try await Task.sleep(nanoseconds: Self.translationModelResourcePollingIntervalNanoseconds)
+        }
     }
 
     private func pauseModelResourceDownload(_ item: ModelResourceItem) {
