@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607070913"
+    static let buildNumber = "202607070918"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -883,6 +883,8 @@ final class AppModel: ObservableObject {
             startModelResourceDownload(item)
         case .pause:
             pauseModelResourceDownload(item)
+        case .remove:
+            openSystemSettings(for: systemSettingsDestination(for: item))
         case .openSystemSettings:
             openSystemSettings(for: systemSettingsDestination(for: item))
         }

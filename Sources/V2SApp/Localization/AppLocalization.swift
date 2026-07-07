@@ -76,6 +76,7 @@ enum AppTextKey: String {
     case modelResourceStateError
     case modelResourceActionDownload
     case modelResourceActionPause
+    case modelResourceActionRemove
     case modelResourceActionOpenSystemSettings
     case glossary
     case glossaryEmpty
@@ -398,6 +399,7 @@ enum AppLocalization {
             "modelResourceStateError": "Error",
             "modelResourceActionDownload": "Download",
             "modelResourceActionPause": "Pause",
+            "modelResourceActionRemove": "Remove in System Settings",
             "modelResourceActionOpenSystemSettings": "Open System Settings",
             "glossary": "Glossary",
             "glossaryEmpty": "No terms added. Use + to add source -> target term pairs.",
@@ -600,6 +602,7 @@ enum AppLocalization {
             "modelResourceStateError": "错误",
             "modelResourceActionDownload": "下载",
             "modelResourceActionPause": "暂停",
+            "modelResourceActionRemove": "删除/管理",
             "modelResourceActionOpenSystemSettings": "打开系统设置",
             "glossary": "术语表",
             "glossaryEmpty": "还没有添加术语。点击 + 添加源词 -> 目标词条目。",
@@ -802,6 +805,7 @@ enum AppLocalization {
             "modelResourceStateError": "Error",
             "modelResourceActionDownload": "Descargar",
             "modelResourceActionPause": "Pausar",
+            "modelResourceActionRemove": "Eliminar en Ajustes",
             "modelResourceActionOpenSystemSettings": "Abrir Ajustes del Sistema",
             "glossary": "Glosario",
             "glossaryEmpty": "No hay términos añadidos. Usa + para agregar pares origen -> destino.",
@@ -998,6 +1002,7 @@ enum AppLocalization {
             "modelResourceStateError": "Fehler",
             "modelResourceActionDownload": "Laden",
             "modelResourceActionPause": "Pausieren",
+            "modelResourceActionRemove": "In Einstellungen entfernen",
             "modelResourceActionOpenSystemSettings": "Systemeinstellungen öffnen",
             "glossary": "Glossar",
             "glossaryEmpty": "Noch keine Begriffe hinzugefügt. Mit + kannst du Quell- -> Zielbegriffe hinzufügen.",
@@ -1194,6 +1199,7 @@ enum AppLocalization {
             "modelResourceStateError": "エラー",
             "modelResourceActionDownload": "ダウンロード",
             "modelResourceActionPause": "一時停止",
+            "modelResourceActionRemove": "システム設定で削除",
             "modelResourceActionOpenSystemSettings": "システム設定を開く",
             "glossary": "用語集",
             "glossaryEmpty": "まだ用語がありません。+ を使って原語 -> 訳語のペアを追加してください。",
@@ -1390,6 +1396,7 @@ enum AppLocalization {
             "modelResourceStateError": "Erreur",
             "modelResourceActionDownload": "Télécharger",
             "modelResourceActionPause": "Pause",
+            "modelResourceActionRemove": "Supprimer dans Réglages",
             "modelResourceActionOpenSystemSettings": "Ouvrir Réglages Système",
             "glossary": "Glossaire",
             "glossaryEmpty": "Aucun terme ajouté. Utilisez + pour ajouter des paires source -> cible.",
@@ -1586,6 +1593,7 @@ enum AppLocalization {
             "modelResourceStateError": "오류",
             "modelResourceActionDownload": "다운로드",
             "modelResourceActionPause": "일시 정지",
+            "modelResourceActionRemove": "시스템 설정에서 삭제",
             "modelResourceActionOpenSystemSettings": "시스템 설정 열기",
             "glossary": "용어집",
             "glossaryEmpty": "추가된 용어가 없습니다. + 를 사용해 원문 -> 대상 용어 쌍을 추가하세요.",
@@ -1782,6 +1790,7 @@ enum AppLocalization {
             "modelResourceStateError": "خطأ",
             "modelResourceActionDownload": "تنزيل",
             "modelResourceActionPause": "إيقاف مؤقت",
+            "modelResourceActionRemove": "إزالة من إعدادات النظام",
             "modelResourceActionOpenSystemSettings": "فتح إعدادات النظام",
             "glossary": "مسرد",
             "glossaryEmpty": "لم تتم إضافة أي مصطلحات بعد. استخدم + لإضافة أزواج مصدر -> هدف.",
@@ -1978,6 +1987,7 @@ enum AppLocalization {
             "modelResourceStateError": "Erro",
             "modelResourceActionDownload": "Baixar",
             "modelResourceActionPause": "Pausar",
+            "modelResourceActionRemove": "Remover em Ajustes",
             "modelResourceActionOpenSystemSettings": "Abrir Ajustes do Sistema",
             "glossary": "Glossário",
             "glossaryEmpty": "Nenhum termo adicionado. Use + para adicionar pares origem -> destino.",
@@ -2174,6 +2184,7 @@ enum AppLocalization {
             "modelResourceStateError": "Ошибка",
             "modelResourceActionDownload": "Загрузить",
             "modelResourceActionPause": "Пауза",
+            "modelResourceActionRemove": "Удалить в настройках",
             "modelResourceActionOpenSystemSettings": "Открыть Системные настройки",
             "glossary": "Глоссарий",
             "glossaryEmpty": "Термины не добавлены. Используйте +, чтобы добавить пары источник -> перевод.",

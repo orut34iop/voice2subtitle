@@ -815,6 +815,8 @@ private struct ModelResourceRow: View {
             return "arrow.down.circle"
         case .pause:
             return "pause.circle"
+        case .remove:
+            return "trash"
         case .openSystemSettings:
             return "gearshape"
         }
@@ -826,6 +828,8 @@ private struct ModelResourceRow: View {
             return model.localized(.modelResourceActionDownload)
         case .pause:
             return model.localized(.modelResourceActionPause)
+        case .remove:
+            return model.localized(.modelResourceActionRemove)
         case .openSystemSettings:
             return model.localized(.modelResourceActionOpenSystemSettings)
         }
