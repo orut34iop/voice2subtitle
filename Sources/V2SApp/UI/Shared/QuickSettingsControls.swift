@@ -81,7 +81,7 @@ struct SourceMenuPicker: View {
         Picker("", selection: $selection) {
             Text(emptyTitle).tag(nil as String?)
             ForEach(sources) { source in
-                Text("\(source.category.displayName(in: interfaceLanguageID)) · \(source.name)")
+                Text("\(source.category.displayName(in: interfaceLanguageID)) · \(source.displayName(in: interfaceLanguageID))")
                     .tag(Optional(source.id))
             }
         }
@@ -101,16 +101,12 @@ struct SourceMultiSelectPicker: View {
         Set(sources.map(\.id))
     }
 
-    private var internalSources: [InputSource] {
-        sources.filter { $0.category == .application }
+    private var allInternalSources: InputSource? {
+        sources.first(where: \.isAllInternalSources)
     }
 
     private var deviceSources: [InputSource] {
         sources.filter { $0.category == .microphone }
-    }
-
-    private var internalSourceIDs: Set<String> {
-        Set(internalSources.map(\.id))
     }
 
     private var deviceSourceIDs: Set<String> {
@@ -122,7 +118,7 @@ struct SourceMultiSelectPicker: View {
     }
 
     private var isAllInternalSourcesSelected: Bool {
-        internalSourceIDs.isEmpty == false && internalSourceIDs.isSubset(of: selection)
+        allInternalSources.map { selection.contains($0.id) } ?? false
     }
 
     private var isAllDeviceSourcesSelected: Bool {
@@ -168,7 +164,7 @@ struct SourceMultiSelectPicker: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 4) {
-                            if internalSources.isEmpty == false {
+                            if allInternalSources != nil {
                                 Button {
                                     toggleAllInternalSources()
                                 } label: {
@@ -210,13 +206,13 @@ struct SourceMultiSelectPicker: View {
                                 .buttonStyle(.plain)
                             }
 
-                            if internalSources.isEmpty == false || deviceSources.isEmpty == false {
+                            if allInternalSources != nil && deviceSources.isEmpty == false {
                                 Divider()
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 2)
                             }
 
-                            ForEach(sources) { source in
+                            ForEach(deviceSources) { source in
                                 Button {
                                     toggle(source.id)
                                 } label: {
@@ -224,7 +220,7 @@ struct SourceMultiSelectPicker: View {
                                         Image(systemName: selection.contains(source.id) ? "checkmark" : "")
                                             .frame(width: 12, alignment: .leading)
                                             .foregroundStyle(Color.accentColor)
-                                        Text("\(source.category.displayName(in: interfaceLanguageID)) · \(source.name)")
+                                        Text("\(source.category.displayName(in: interfaceLanguageID)) · \(source.displayName(in: interfaceLanguageID))")
                                             .font(.callout)
                                             .foregroundStyle(.primary)
                                             .lineLimit(1)
@@ -240,7 +236,7 @@ struct SourceMultiSelectPicker: View {
                         }
                         .padding(.vertical, 8)
                     }
-                    .frame(width: 320, height: min(max(CGFloat(sources.count) * 34, 120), 280))
+                    .frame(width: 320, height: min(max(CGFloat(menuRowCount) * 34, 120), 280))
                 }
 
                 Divider()
@@ -264,7 +260,7 @@ struct SourceMultiSelectPicker: View {
         case 0:
             return emptyTitle
         case 1:
-            return selected[0].name
+            return selected[0].displayName(in: interfaceLanguageID)
         default:
             if isAllSourcesSelected {
                 return AppLocalization.string(.allSources, languageID: interfaceLanguageID)
@@ -274,11 +270,8 @@ struct SourceMultiSelectPicker: View {
     }
 
     private func toggleAllInternalSources() {
-        if isAllInternalSourcesSelected {
-            selection.subtract(internalSourceIDs)
-        } else {
-            selection.formUnion(internalSourceIDs)
-        }
+        guard let allInternalSources else { return }
+        toggle(allInternalSources.id)
     }
 
     private func toggleAllDeviceSources() {
@@ -295,6 +288,11 @@ struct SourceMultiSelectPicker: View {
         } else {
             selection.insert(id)
         }
+    }
+
+    private var menuRowCount: Int {
+        (allInternalSources == nil ? 0 : 1)
+            + (deviceSources.isEmpty ? 0 : deviceSources.count + 1)
     }
 }
 

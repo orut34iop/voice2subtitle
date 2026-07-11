@@ -1,4 +1,3 @@
-import AppKit
 import AVFoundation
 import CoreAudio
 import CoreMedia
@@ -65,7 +64,6 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     private struct ApplicationCaptureDescriptor: Sendable {
         let appName: String
-        let processObjectIDs: [AudioObjectID]
         let readStreamFailureMessage: String
     }
 
@@ -95,8 +93,6 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         case unsupportedSpeechLocale(String)
         case unavailableSpeechRecognizer(String)
         case missingMicrophoneDevice
-        case missingApplication(String)
-        case applicationNotProducingAudio(String)
         case failedToStartCapture(String)
 
         func localizedDescription(languageID: String) -> String {
@@ -115,10 +111,6 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
                 return AppLocalization.string(.unavailableSpeechRecognizerFormat, languageID: languageID, localeIdentifier)
             case .missingMicrophoneDevice:
                 return AppLocalization.string(.missingMicrophoneDevice, languageID: languageID)
-            case .missingApplication(let appName):
-                return AppLocalization.string(.missingApplicationFormat, languageID: languageID, appName)
-            case .applicationNotProducingAudio(let appName):
-                return AppLocalization.string(.applicationNotProducingAudioFormat, languageID: languageID, appName)
             case .failedToStartCapture(let reason):
                 return AppLocalization.string(.failedToStartCaptureFormat, languageID: languageID, reason)
             }
@@ -260,8 +252,8 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
                 try self.startMicrophoneCapture(deviceUniqueID: source.detail)
             }
         case .application:
-            let captureDescriptor = try await MainActor.run {
-                try self.makeApplicationCaptureDescriptor(for: source)
+            let captureDescriptor = await MainActor.run {
+                self.makeApplicationCaptureDescriptor(for: source)
             }
             try await runOnCaptureQueue {
                 try self.startApplicationAudioCapture(descriptor: captureDescriptor)
@@ -654,18 +646,17 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
     }
 
     @MainActor
-    private func makeApplicationCaptureDescriptor(for source: InputSource) throws -> ApplicationCaptureDescriptor {
-        ApplicationCaptureDescriptor(
-            appName: source.name,
-            processObjectIDs: try resolveApplicationProcessObjectIDs(for: source),
-            readStreamFailureMessage: localized(.failedToReadCapturedAudioStreamFormat, source.name)
+    private func makeApplicationCaptureDescriptor(for source: InputSource) -> ApplicationCaptureDescriptor {
+        let sourceName = source.displayName(in: interfaceLanguageID)
+        return ApplicationCaptureDescriptor(
+            appName: sourceName,
+            readStreamFailureMessage: localized(.failedToReadCapturedAudioStreamFormat, sourceName)
         )
     }
 
     private func startApplicationAudioCapture(descriptor: ApplicationCaptureDescriptor) throws {
         let capture = ApplicationAudioCapture(
             appName: descriptor.appName,
-            processObjectIDs: descriptor.processObjectIDs,
             readStreamFailureMessage: descriptor.readStreamFailureMessage,
             queue: captureQueue,
             audioHandler: { [weak self] buffer in
@@ -692,68 +683,6 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
                 )
             )
         }
-    }
-
-    private func resolveApplicationProcessObjectIDs(for source: InputSource) throws -> [AudioObjectID] {
-        let runningApp = try resolveRunningApplication(for: source)
-        let system = AudioHardwareSystem.shared
-        let audioProcesses = try system.processes
-        let targetAssociation = ApplicationProcessAssociation(runningApplication: runningApp)
-        var relatedProcessIDs: [AudioObjectID] = []
-        var seen = Set<AudioObjectID>()
-
-        for process in audioProcesses {
-            let processID = try process.pid
-            let processObjectID = process.id
-            let processBundleIdentifier = (try? process.bundleID) ?? ""
-            let processAppBundleURL = applicationBundleURL(forProcessID: processID)
-            let executablePath = executablePath(forProcessID: processID)
-
-            let matchesMainProcess = processID == runningApp.processIdentifier
-            let matchesBundleIdentifier = targetAssociation.matchesExactBundleIdentifier(processBundleIdentifier)
-            let matchesBundleURL = targetAssociation.matchesApplicationBundleURL(processAppBundleURL)
-            let matchesHelperBundle = targetAssociation.matchesHelperBundleIdentifier(processBundleIdentifier)
-            let matchesHelperPath = targetAssociation.matchesHelperExecutablePath(executablePath)
-
-            guard matchesMainProcess
-                || matchesBundleIdentifier
-                || matchesBundleURL
-                || matchesHelperBundle
-                || matchesHelperPath else {
-                    continue
-                }
-
-            if seen.insert(processObjectID).inserted {
-                relatedProcessIDs.append(processObjectID)
-            }
-        }
-
-        if relatedProcessIDs.isEmpty {
-            if let exactProcess = try system.process(for: runningApp.processIdentifier) {
-                return [exactProcess.id]
-            }
-
-            throw SessionError.applicationNotProducingAudio(source.name)
-        }
-
-        return relatedProcessIDs
-    }
-
-    private func resolveRunningApplication(for source: InputSource) throws -> NSRunningApplication {
-        let runningApps = NSWorkspace.shared.runningApplications
-        let application: NSRunningApplication?
-
-        if let processIdentifier = source.processIdentifierHint {
-            application = runningApps.first(where: { $0.processIdentifier == processIdentifier })
-        } else {
-            application = runningApps.first(where: { $0.bundleIdentifier == source.detail })
-        }
-
-        guard let application else {
-            throw SessionError.missingApplication(source.name)
-        }
-
-        return application
     }
 
     private func append(sampleBuffer: CMSampleBuffer) {
@@ -2377,7 +2306,6 @@ private final class ApplicationAudioCapture {
     }
 
     private let appName: String
-    private let processObjectIDs: [AudioObjectID]
     private let readStreamFailureMessage: String
     private let queue: DispatchQueue
     private let audioHandler: (AVAudioPCMBuffer) -> Void
@@ -2391,14 +2319,12 @@ private final class ApplicationAudioCapture {
 
     init(
         appName: String,
-        processObjectIDs: [AudioObjectID],
         readStreamFailureMessage: String,
         queue: DispatchQueue,
         audioHandler: @escaping (AVAudioPCMBuffer) -> Void,
         errorHandler: @escaping (String) -> Void
     ) {
         self.appName = appName
-        self.processObjectIDs = processObjectIDs
         self.readStreamFailureMessage = readStreamFailureMessage
         self.queue = queue
         self.audioHandler = audioHandler
@@ -2407,7 +2333,7 @@ private final class ApplicationAudioCapture {
 
     func start() throws {
         do {
-            let tapDescription = CATapDescription(monoMixdownOfProcesses: processObjectIDs)
+            let tapDescription = makeAllInternalAudioTapDescription()
             tapDescription.uuid = UUID()
             tapDescription.muteBehavior = .unmuted
             tapDescription.isPrivate = true
@@ -2538,6 +2464,11 @@ private final class ApplicationAudioCapture {
     }
 }
 
+func makeAllInternalAudioTapDescription() -> CATapDescription {
+    // A global exclusive tap follows the system mix, including processes launched after capture starts.
+    CATapDescription(monoGlobalTapButExcludeProcesses: [])
+}
+
 private struct AudioFormatSignature: Equatable {
     let sampleRate: Double
     let channelCount: AVAudioChannelCount
@@ -2555,110 +2486,6 @@ private struct AudioFormatSignature: Equatable {
 private extension AVAudioFormat {
     func matches(_ other: AVAudioFormat) -> Bool {
         AudioFormatSignature(self) == AudioFormatSignature(other)
-    }
-}
-
-private extension InputSource {
-    var processIdentifierHint: pid_t? {
-        guard detail.hasPrefix("pid-") else {
-            return nil
-        }
-
-        return pid_t(detail.dropFirst(4))
-    }
-}
-
-private struct ApplicationProcessAssociation {
-    let bundleIdentifier: String?
-    let applicationBundleURL: URL?
-    let helperBundlePrefixes: [String]
-    let helperPathFragments: [String]
-
-    init(runningApplication: NSRunningApplication) {
-        self.bundleIdentifier = runningApplication.bundleIdentifier
-        self.applicationBundleURL = runningApplication.bundleURL?.standardizedFileURL
-
-        var helperBundlePrefixes: [String] = []
-        var helperPathFragments: [String] = []
-
-        if let bundleIdentifier = runningApplication.bundleIdentifier {
-            helperBundlePrefixes.append(bundleIdentifier)
-
-            switch bundleIdentifier {
-            case "com.apple.Safari":
-                helperBundlePrefixes.append(contentsOf: [
-                    "com.apple.WebKit.",
-                    "com.apple.Safari"
-                ])
-                helperPathFragments.append(contentsOf: [
-                    "/WebKit.framework/",
-                    "/SafariPlatformSupport.framework/",
-                    "/Safari.app/"
-                ])
-            case "com.google.Chrome":
-                helperPathFragments.append(contentsOf: [
-                    "/Google Chrome.app/",
-                    "Google Chrome Helper"
-                ])
-            case "org.chromium.Chromium":
-                helperPathFragments.append(contentsOf: [
-                    "/Chromium.app/",
-                    "Chromium Helper"
-                ])
-            case "com.microsoft.edgemac":
-                helperPathFragments.append(contentsOf: [
-                    "/Microsoft Edge.app/",
-                    "Microsoft Edge Helper"
-                ])
-            case "com.brave.Browser":
-                helperPathFragments.append(contentsOf: [
-                    "/Brave Browser.app/",
-                    "Brave Browser Helper"
-                ])
-            case "org.mozilla.firefox":
-                helperPathFragments.append(contentsOf: [
-                    "/Firefox.app/",
-                    "plugin-container"
-                ])
-            default:
-                break
-            }
-        }
-
-        self.helperBundlePrefixes = Array(Set(helperBundlePrefixes))
-        self.helperPathFragments = Array(Set(helperPathFragments))
-    }
-
-    func matchesExactBundleIdentifier(_ candidate: String) -> Bool {
-        guard let bundleIdentifier else {
-            return false
-        }
-
-        return candidate == bundleIdentifier
-    }
-
-    func matchesApplicationBundleURL(_ candidate: URL?) -> Bool {
-        guard let applicationBundleURL else {
-            return false
-        }
-
-        return candidate == applicationBundleURL
-    }
-
-    func matchesHelperBundleIdentifier(_ candidate: String) -> Bool {
-        guard candidate.isEmpty == false else {
-            return false
-        }
-
-        return helperBundlePrefixes.contains(where: { candidate.hasPrefix($0) })
-    }
-
-    func matchesHelperExecutablePath(_ candidate: String?) -> Bool {
-        guard let candidate, candidate.isEmpty == false else {
-            return false
-        }
-
-        return helperPathFragments.contains(where: { candidate.contains($0) })
     }
 }
 
@@ -2737,45 +2564,5 @@ private extension OSStatus {
         }
 
         return String(bytes: scalarValues, encoding: .ascii)
-    }
-}
-
-private func executablePath(forProcessID processID: pid_t) -> String? {
-    let pathBuffer = UnsafeMutablePointer<CChar>.allocate(capacity: Int(MAXPATHLEN))
-    defer {
-        pathBuffer.deallocate()
-    }
-
-    let pathLength = proc_pidpath(processID, pathBuffer, UInt32(MAXPATHLEN))
-    guard pathLength > 0 else {
-        return nil
-    }
-
-    return String(cString: pathBuffer)
-}
-
-private func applicationBundleURL(forProcessID processID: pid_t) -> URL? {
-    guard let executablePath = executablePath(forProcessID: processID) else {
-        return nil
-    }
-
-    return URL(fileURLWithPath: executablePath).owningApplicationBundleURL()
-}
-
-private extension URL {
-    func owningApplicationBundleURL(maxDepth: Int = 16) -> URL? {
-        var depth = 0
-        var currentURL = standardizedFileURL
-
-        while depth < maxDepth {
-            if currentURL.pathExtension == "app" {
-                return currentURL.standardizedFileURL
-            }
-
-            currentURL = currentURL.deletingLastPathComponent()
-            depth += 1
-        }
-
-        return nil
     }
 }

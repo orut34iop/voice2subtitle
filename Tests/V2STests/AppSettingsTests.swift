@@ -3,6 +3,60 @@ import XCTest
 @testable import v2s
 
 final class AppSettingsTests: XCTestCase {
+    func testAllInternalSourceIsStableAndLocalized() {
+        let source = InputSource.allInternalSources
+
+        XCTAssertEqual(source.id, InputSource.allInternalSourcesID)
+        XCTAssertEqual(source.category, .application)
+        XCTAssertTrue(source.isAllInternalSources)
+        XCTAssertEqual(source.displayName(in: "zh-Hans"), "全部内部来源")
+    }
+
+    func testLegacyApplicationSelectionsMigrateToAllInternalSources() {
+        let migrated = InputSource.migratingLegacyApplicationSourceIDs([
+            "app:com.apple.Safari",
+            "app:com.google.Chrome",
+            "mic:built-in"
+        ])
+
+        XCTAssertEqual(migrated, [InputSource.allInternalSourcesID, "mic:built-in"])
+        XCTAssertEqual(
+            InputSource.migratingLegacyApplicationSourceID("app:com.apple.Safari"),
+            InputSource.allInternalSourcesID
+        )
+    }
+
+    func testLegacyApplicationLanguageOverrideMigratesToAllInternalSources() {
+        let migrated = InputSource.migratingLegacyApplicationSourceValues(
+            [
+                "app:com.apple.Safari": "ja",
+                "app:com.google.Chrome": "en",
+                "mic:built-in": "zh-Hans"
+            ],
+            preferredSourceID: "app:com.google.Chrome"
+        )
+
+        XCTAssertEqual(
+            migrated,
+            [InputSource.allInternalSourcesID: "en", "mic:built-in": "zh-Hans"]
+        )
+    }
+
+    func testAllInternalAudioTapIsGlobalMonoMix() {
+        let description = makeAllInternalAudioTapDescription()
+
+        XCTAssertTrue(description.isExclusive)
+        XCTAssertTrue(description.isMono)
+        XCTAssertTrue(description.processes.isEmpty)
+    }
+
+    @MainActor
+    func testSourceCatalogExposesOnlyAggregateInternalSource() {
+        let snapshot = SourceCatalogService().loadSnapshot()
+
+        XCTAssertEqual(snapshot.applications, [.allInternalSources])
+    }
+
     func testLegacySingleSourceSettingsDecodeIntoMultiSourceFields() throws {
         let json = """
         {

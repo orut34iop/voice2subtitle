@@ -555,7 +555,7 @@ struct SettingsView: View {
             ForEach(sources) { source in
                 Divider()
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(source.name)
+                    Text(source.displayName(in: model.resolvedInterfaceLanguageID))
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     SettingsControlRow(label: model.localized(.inputLanguage)) {

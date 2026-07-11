@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202607070949"
+    static let buildNumber = "202607112252"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -181,16 +181,22 @@ final class AppModel: ObservableObject {
         self.sourceCatalogService = sourceCatalogService
 
         let settings = settingsStore.load()
-        self.selectedSourceID = settings.selectedSourceID
+        self.selectedSourceID = InputSource.migratingLegacyApplicationSourceID(settings.selectedSourceID)
         var initialSelectedSourceIDs = Set(settings.selectedSourceIDs)
         if initialSelectedSourceIDs.isEmpty, let selectedSourceID = settings.selectedSourceID {
             initialSelectedSourceIDs = [selectedSourceID]
         }
-        self.selectedSourceIDs = initialSelectedSourceIDs
-        self.sourceLanguageOverrides = settings.sourceLanguageOverrides.mapValues {
+        self.selectedSourceIDs = InputSource.migratingLegacyApplicationSourceIDs(initialSelectedSourceIDs)
+        self.sourceLanguageOverrides = InputSource.migratingLegacyApplicationSourceValues(
+            settings.sourceLanguageOverrides,
+            preferredSourceID: settings.selectedSourceID
+        ).mapValues {
             LanguageCatalog.supportedSpeechInputLanguageID(for: $0)
         }
-        self.sourceOutputLanguageOverrides = settings.sourceOutputLanguageOverrides
+        self.sourceOutputLanguageOverrides = InputSource.migratingLegacyApplicationSourceValues(
+            settings.sourceOutputLanguageOverrides,
+            preferredSourceID: settings.selectedSourceID
+        )
         self.inputLanguageID = LanguageCatalog.supportedSpeechInputLanguageID(for: settings.inputLanguageID)
         self.outputLanguageID = settings.outputLanguageID
         self.usesSystemInterfaceLanguage = settings.interfaceLanguageID == nil
@@ -262,7 +268,7 @@ final class AppModel: ObservableObject {
     }
 
     private func sourceDisplayName(for sources: [InputSource]) -> String {
-        let names = sources.map(\.name)
+        let names = sources.map { $0.displayName(in: resolvedInterfaceLanguageID) }
         switch names.count {
         case 0:
             return localized(.selectedSource)
@@ -517,7 +523,8 @@ final class AppModel: ObservableObject {
 
         let availableSources = snapshot.applications + snapshot.microphones
         let availableSourceIDs = Set(availableSources.map(\.id))
-        let retainedSelectedSourceIDs = selectedSourceIDs.intersection(availableSourceIDs)
+        let migratedSelectedSourceIDs = InputSource.migratingLegacyApplicationSourceIDs(selectedSourceIDs)
+        let retainedSelectedSourceIDs = migratedSelectedSourceIDs.intersection(availableSourceIDs)
 
         if retainedSelectedSourceIDs != selectedSourceIDs {
             selectedSourceIDs = retainedSelectedSourceIDs
@@ -597,6 +604,7 @@ final class AppModel: ObservableObject {
         func startSource(_ source: InputSource) async {
             let sourceLanguageID = languageID(for: source)
             let targetLanguageID = outputLanguageIDForSource(source)
+            let sourceName = source.displayName(in: resolvedInterfaceLanguageID)
             let session = LiveTranscriptionSession()
 
             do {
@@ -628,7 +636,7 @@ final class AppModel: ObservableObject {
                         self?.overlayState = OverlayPreviewState(
                             translatedText: self?.captureStoppedText ?? "",
                             sourceText: message,
-                            sourceName: source.name
+                            sourceName: sourceName
                         )
                     }
                 )
@@ -2281,7 +2289,7 @@ final class AppModel: ObservableObject {
         overlayState?.draftSourceText = draftText
         overlayState?.draftStablePrefixLength = min(draft?.stablePrefixLength ?? 0, draftText.count)
         overlayState?.draftPromotionID = draftPromotionID
-        overlayState?.sourceName = source.name
+        overlayState?.sourceName = source.displayName(in: resolvedInterfaceLanguageID)
         overlayState?.clearDraftTranslationIfMismatched(
             sourceText: draftText,
             promotionID: draftPromotionID
@@ -2580,7 +2588,7 @@ final class AppModel: ObservableObject {
         return OverlayPreviewState(
             translatedText: translatedText,
             sourceText: sourceText,
-            sourceName: source.name
+            sourceName: source.displayName(in: resolvedInterfaceLanguageID)
         )
     }
 
@@ -2614,7 +2622,7 @@ final class AppModel: ObservableObject {
                 id: UUID(),
                 promotionID: promotionID,
                 sourceText: sourceText,
-                sourceName: source.name,
+                sourceName: source.displayName(in: resolvedInterfaceLanguageID),
                 sourceLanguageID: sourceLanguageID,
                 targetLanguageID: targetLanguageID,
                 promotedDraftTranslation: promotedDraftTranslation
@@ -2634,7 +2642,7 @@ final class AppModel: ObservableObject {
                 id: UUID(),
                 promotionID: UUID(),
                 sourceText: sourceText,
-                sourceName: source.name,
+                sourceName: source.displayName(in: resolvedInterfaceLanguageID),
                 sourceLanguageID: sourceLanguageID,
                 targetLanguageID: targetLanguageID,
                 promotedDraftTranslation: nil
