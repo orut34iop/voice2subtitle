@@ -222,7 +222,11 @@ final class OverlayWindowController {
     }
 
     private var shouldShowSideControls: Bool {
-        isRunningSession == false || sideControlsRevealedByHover
+        isRunningSession == false || sideControlsRevealedByHover || isOverlayInteractionActive
+    }
+
+    private var isOverlayInteractionActive: Bool {
+        dragStartTopLeft != nil || resizeDragStartTopLeft != nil
     }
 
     private var overlayHighContentLevel: NSWindow.Level {
@@ -355,8 +359,7 @@ final class OverlayWindowController {
             // Keep a visible overlay in its current Space instead of re-ordering it
             // on every subtitle update.
             // Skip animated repositioning while the user is dragging to prevent jumps.
-            let isDragging = dragStartTopLeft != nil || resizeDragStartTopLeft != nil
-            if !isDragging {
+            if isOverlayInteractionActive == false {
                 positionPanels(animated: true)
             }
             startMouseTrackingIfNeeded()
@@ -661,9 +664,7 @@ final class OverlayWindowController {
         guard let screen = currentScreen() else { return }
 
         let persistsUserDefinedPosition = userDefinedTopLeft != nil
-        let isUserPositioningOverlay = persistsUserDefinedPosition
-            || dragStartTopLeft != nil
-            || resizeDragStartTopLeft != nil
+        let isUserPositioningOverlay = persistsUserDefinedPosition || isOverlayInteractionActive
         let visibleFrame = isUserPositioningOverlay ? screen.frame : screen.visibleFrame
         let style = model.overlayStyle
 
@@ -1049,7 +1050,10 @@ final class OverlayWindowController {
         }
 
         let isHoveringSideControls = sideControlPanels.contains { $0.frame.contains(mouseLocation) }
-        let shouldReveal = isOverlayHovered || isHoveringSideControls
+        // Keep the panel that owns the current mouse-down sequence on screen.
+        // Ordering it out while moving or resizing cancels the AppKit drag,
+        // which previously made the runtime controls appear unresponsive.
+        let shouldReveal = isOverlayInteractionActive || isOverlayHovered || isHoveringSideControls
         guard shouldReveal != sideControlsRevealedByHover else { return }
 
         sideControlsRevealedByHover = shouldReveal
