@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202609081527"
+    static let buildNumber = "202609081547"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -27,7 +27,7 @@ final class AppModel: ObservableObject {
     let translationCoordinator = TranslationCoordinator()
     private let glossaryService = GlossaryService()
     let transcriptStore = TranscriptStore()
-    private let sessionLifecycle = SessionLifecycle()
+    private let sessionLifecycle: SessionLifecycle
     private var sessionStartTask: Task<Void, Never>?
     private var sessionStopTask: Task<Void, Never>?
     private var captionPipelineID = UUID()
@@ -176,8 +176,10 @@ final class AppModel: ObservableObject {
 
     init(
         settingsStore: SettingsStore,
-        sourceCatalogService: SourceCatalogService
+        sourceCatalogService: SourceCatalogService,
+        sessionLifecycle: SessionLifecycle? = nil
     ) {
+        self.sessionLifecycle = sessionLifecycle ?? SessionLifecycle()
         self.settingsStore = settingsStore
         self.sourceCatalogService = sourceCatalogService
 
@@ -355,7 +357,7 @@ final class AppModel: ObservableObject {
     }
 
     var sessionButtonSymbolName: String {
-        sessionState == .running ? "stop.fill" : "play.fill"
+        (sessionState == .running || sessionState == .starting) ? "stop.fill" : "play.fill"
     }
 
     var showsSessionWaitIndicator: Bool {
@@ -622,6 +624,7 @@ final class AppModel: ObservableObject {
                         guard let self, self.sessionLifecycle.accepts(sessionID) else { return }
                         self.enqueueRecognizedSentence(
                             sentence,
+                            sessionID: sessionID,
                             source: source,
                             sourceLanguageID: sourceLanguageID,
                             targetLanguageID: targetLanguageID
@@ -1181,13 +1184,14 @@ final class AppModel: ObservableObject {
 
     // MARK: - Caption queue
 
-    private func enqueueRecognizedSentence(
+    func enqueueRecognizedSentence(
         _ sentence: RecognizedSentence,
+        sessionID: UUID,
         source: InputSource,
         sourceLanguageID: String,
         targetLanguageID: String
     ) {
-        guard sessionLifecycle.currentID != nil else { return }
+        guard sessionLifecycle.accepts(sessionID) else { return }
         let sourceText = sanitizedDisplayText(sentence.text)
         guard sourceText.isEmpty == false else {
             return

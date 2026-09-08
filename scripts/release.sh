@@ -71,7 +71,9 @@ resolve_default_branch() {
 }
 
 resolve_repo_name() {
-  gh repo view --json nameWithOwner --jq .nameWithOwner
+  local origin_url
+  origin_url="$(git -C "$ROOT_DIR" remote get-url origin)"
+  gh repo view "$origin_url" --json nameWithOwner --jq .nameWithOwner
 }
 
 active_release_workflow_id() {
@@ -133,8 +135,9 @@ wait_for_release_workflow_run() {
 dispatch_release_workflow() {
   local tag="$1"
   local default_branch="$2"
+  local repo="$3"
 
-  gh workflow run "$RELEASE_WORKFLOW_NAME" --ref "$default_branch" -f tag="$tag" >/dev/null
+  gh workflow run "$RELEASE_WORKFLOW_NAME" --repo "$repo" --ref "$default_branch" -f tag="$tag" >/dev/null
 }
 
 extract_setting() {
@@ -217,12 +220,8 @@ assert_tag_available() {
 
 apply_version_bump() {
   local version="$1"
-  local build_number="$2"
 
-  perl -0pi -e "s/MARKETING_VERSION = [^;]+;/MARKETING_VERSION = ${version};/g" "$PROJECT_FILE"
-  perl -0pi -e "s/CURRENT_PROJECT_VERSION = [^;]+;/CURRENT_PROJECT_VERSION = ${build_number};/g" "$PROJECT_FILE"
-  perl -0pi -e 's/static let marketingVersion = "[^"]+"/static let marketingVersion = "'"${version}"'"/g' "$VERSION_SOURCE_FILE"
-  perl -0pi -e 's/static let buildNumber = "[^"]+"/static let buildNumber = "'"${build_number}"'"/g' "$VERSION_SOURCE_FILE"
+  python3 "$ROOT_DIR/scripts/build-metadata.py" --stamp --version "$version"
 }
 
 main() {
@@ -252,6 +251,7 @@ main() {
   require_cmd git
   require_cmd gh
   require_cmd perl
+  require_cmd python3
 
   [[ -f "$PROJECT_FILE" ]] || fail "Xcode project file not found: ${PROJECT_FILE}"
   [[ -f "$VERSION_SOURCE_FILE" ]] || fail "Version source file not found: ${VERSION_SOURCE_FILE}"
@@ -284,12 +284,11 @@ main() {
   [[ "$current_build" =~ ^[0-9]+$ ]] || fail "CURRENT_PROJECT_VERSION must be numeric. Found: ${current_build}"
 
   next_version="$(bump_version "$current_version" "$bump")"
-  next_build="$((current_build + 1))"
   tag="v${next_version}"
 
   assert_tag_available "$tag"
 
-  printf 'Releasing %s (build %s -> %s)\n' "$next_version" "$current_build" "$next_build"
+  printf 'Preparing release %s\n' "$next_version"
 
   PROJECT_FILE_BACKUP="${PROJECT_FILE}.release.bak"
   VERSION_SOURCE_FILE_BACKUP="${VERSION_SOURCE_FILE}.release.bak"
@@ -297,10 +296,13 @@ main() {
   cp "$VERSION_SOURCE_FILE" "$VERSION_SOURCE_FILE_BACKUP"
   ROLLBACK_ON_EXIT=1
 
-  apply_version_bump "$next_version" "$next_build"
+  apply_version_bump "$next_version"
+  next_build="$(extract_setting "CURRENT_PROJECT_VERSION")"
+  printf 'Releasing %s (build %s -> %s)\n' "$next_version" "$current_build" "$next_build"
 
   git -C "$ROOT_DIR" add "$PROJECT_FILE" "$VERSION_SOURCE_FILE"
   git -C "$ROOT_DIR" commit -m "chore(release): ${tag}"
+  ROLLBACK_ON_EXIT=0
   git -C "$ROOT_DIR" tag -a "$tag" -m "$tag"
   git -C "$ROOT_DIR" push origin HEAD
   workflow_id="$(wait_for_release_workflow "$repo")"
@@ -313,7 +315,7 @@ main() {
   if [[ -z "$run_url" ]]; then
     printf 'No release workflow run appeared after pushing %s; dispatching workflow manually.\n' "$tag"
     dispatch_started_at="$(current_utc_timestamp)"
-    dispatch_release_workflow "$tag" "$default_branch"
+    dispatch_release_workflow "$tag" "$default_branch" "$repo"
     run_url="$(wait_for_release_workflow_run "$repo" "$workflow_id" "$dispatch_started_at" || true)"
     [[ -n "$run_url" ]] || fail "Release workflow did not appear after manual dispatch for ${tag}."
   fi

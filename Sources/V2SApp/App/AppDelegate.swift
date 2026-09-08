@@ -4,9 +4,9 @@ import Darwin
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let appModel = AppModel()
-    private let updaterService = UpdaterService()
-    private let launchAtLoginService = LaunchAtLoginService()
+    private lazy var appModel = AppModel()
+    private lazy var updaterService = UpdaterService()
+    private lazy var launchAtLoginService = LaunchAtLoginService()
     private let dockVisibilityController = DockVisibilityController()
     private lazy var transcriptWindowController = TranscriptWindowController(model: appModel)
     private var statusBarController: StatusBarController?
@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard ProcessInfo.processInfo.environment["V2S_TESTING"] != "1" else { return }
         if acquireSingleInstanceLock() == false {
             if handOffToExistingInstanceIfPossible() {
                 return
@@ -305,6 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        guard ProcessInfo.processInfo.environment["V2S_TESTING"] != "1" else { return }
         if let singleInstanceWakeObserver {
             DistributedNotificationCenter.default().removeObserver(singleInstanceWakeObserver)
             self.singleInstanceWakeObserver = nil

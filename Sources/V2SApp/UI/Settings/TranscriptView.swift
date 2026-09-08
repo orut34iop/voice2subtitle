@@ -86,8 +86,10 @@ struct TranscriptView: View {
         .frame(minWidth: 520, minHeight: 480)
         .environment(\.locale, model.interfaceLocale)
         .onChange(of: selectedTab) { _, _ in
-            // Reset summary when switching tabs so user can summarize per-tab
             summarizeError = nil
+            if isSummarizeEnabled, summarizedText[selectedTab] == nil {
+                startSummarization(for: selectedTab)
+            }
         }
         .onChange(of: model.transcriptGeneration) { _, _ in
             cancelSummarization()

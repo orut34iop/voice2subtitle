@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -14,113 +14,70 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
-      - name: Parse version from tag
-        id: version
+      - name: Verify release version
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          python3 scripts/build-metadata.py --version "${RELEASE_TAG#v}"
+          python3 scripts/verify-project.py
+          python3 -m unittest discover -s Tests/BuildTools
 
-          case "$TAG" in
-            v*)
-              ;;
-            *)
-              echo "::error::Expected tag in the form v<version>, got: $TAG"
-              exit 1
-              ;;
-          esac
+      - name: Run regression tests
+        run: scripts/test.sh
 
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build release app
-        run: |
-          xcodebuild \
-            -project v2s.xcodeproj \
-            -scheme v2s \
-            -configuration Release \
-            -derivedDataPath .build/release \
-            build
+      - name: Build release app with current build time
+        run: scripts/build.sh Release
 
       - name: Package app
-        id: package
         run: |
-          APP_PATH=".build/release/Build/Products/Release/v2s.app"
-          ZIP_PATH="dist/v2s-${{ steps.version.outputs.version }}.app.zip"
-          CHECKSUM_PATH="dist/v2s-${{ steps.version.outputs.version }}.sha256"
-
+          APP_PATH=".build/app/Build/Products/Release/v2s.app"
+          python3 scripts/build-metadata.py --version "${RELEASE_TAG#v}"
+          codesign --verify --deep --strict "$APP_PATH"
+          test "$(lipo -archs "$APP_PATH/Contents/MacOS/v2s")" = arm64
           mkdir -p dist
-          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-          (cd dist && shasum -a 256 "$(basename "$ZIP_PATH")" > "$(basename "$CHECKSUM_PATH")")
-
-          echo "zip=$ZIP_PATH" >> "$GITHUB_OUTPUT"
-          echo "checksum=$CHECKSUM_PATH" >> "$GITHUB_OUTPUT"
+          ZIP_NAME="v2s-${RELEASE_TAG#v}.app.zip"
+          ditto -c -k --keepParent "$APP_PATH" "dist/$ZIP_NAME"
+          (cd dist && shasum -a 256 "$ZIP_NAME" > "v2s-${RELEASE_TAG#v}.sha256")
 
       - name: Generate appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          # Find Sparkle bin directory from SPM build artifacts
-          SPARKLE_BIN=""
-          for candidate in \
-            "$(find .build -name generate_appcast -type f 2>/dev/null | head -1)"; do
-            if [ -n "$candidate" ] && [ -f "$candidate" ]; then
-              SPARKLE_BIN="$(dirname "$candidate")"
-              break
-            fi
-          done
-
-          if [ -z "$SPARKLE_BIN" ]; then
-            echo "::error::Could not find generate_appcast in .build artifacts"
-            exit 1
-          fi
-
-          echo "Sparkle bin: $SPARKLE_BIN"
-
-          # Write EdDSA private key to a temporary file
+          SPARKLE_TOOL="$(find .build/app -name generate_appcast -type f -print -quit)"
+          test -n "$SPARKLE_TOOL"
           KEY_FILE="$(mktemp)"
-          echo "${{ secrets.SPARKLE_PRIVATE_KEY }}" > "$KEY_FILE"
-
-          # Download previous appcast if it exists, so generate_appcast can append
-          curl -fsSL \
-            "https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml" \
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
+          curl -fsSL "https://github.com/$REPOSITORY/releases/latest/download/appcast.xml" \
             -o dist/appcast.xml 2>/dev/null || true
-
-          "$SPARKLE_BIN/generate_appcast" \
-            --ed-key-file "$KEY_FILE" \
-            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/" \
-            --link "https://github.com/${{ github.repository }}" \
-            dist/
-
-          rm -f "$KEY_FILE"
+          "$SPARKLE_TOOL" --ed-key-file "$KEY_FILE" \
+            --download-url-prefix "https://github.com/$REPOSITORY/releases/download/$RELEASE_TAG/" \
+            --link "https://github.com/$REPOSITORY" dist/
 
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" \
-              "${{ steps.package.outputs.zip }}" \
-              "${{ steps.package.outputs.checksum }}" \
-              dist/appcast.xml \
-              --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "dist/v2s-${RELEASE_TAG#v}.app.zip" \
+              "dist/v2s-${RELEASE_TAG#v}.sha256" dist/appcast.xml --clobber
           else
-            gh release create "$TAG" \
-              "${{ steps.package.outputs.zip }}" \
-              "${{ steps.package.outputs.checksum }}" \
-              dist/appcast.xml \
-              --title "$TAG" \
-              --generate-notes \
-              --verify-tag
+            gh release create "$RELEASE_TAG" "dist/v2s-${RELEASE_TAG#v}.app.zip" \
+              "dist/v2s-${RELEASE_TAG#v}.sha256" dist/appcast.xml \
+              --title "$RELEASE_TAG" --generate-notes --verify-tag
           fi

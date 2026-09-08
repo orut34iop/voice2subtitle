@@ -28,7 +28,14 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
+         <TestableReference skipped="NO" parallelizable="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="8F692FEAE505382C06343536"
+               BuildableName="v2sTests.xctest" BlueprintName="v2sTests" ReferencedContainer="container:v2s.xcodeproj" />
+         </TestableReference>
       </Testables>
+      <EnvironmentVariables>
+         <EnvironmentVariable key="V2S_TESTING" value="1" isEnabled="YES" />
+      </EnvironmentVariables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

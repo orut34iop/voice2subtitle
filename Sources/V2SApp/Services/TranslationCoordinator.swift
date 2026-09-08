@@ -107,6 +107,8 @@ final class TranslationCoordinator: ObservableObject {
 
     private var currentPair: LanguagePair?
     private var pendingOperations: [PendingOperation] = []
+    private var availabilityRequests: [UUID: (task: Task<Void, Never>, cancel: () -> Void)] = [:]
+    var pendingRequestCount: Int { pendingOperations.count }
     private var activeRunnerID: UUID?
     private var cancelActiveBackend: (() -> Void)?
     private var activeOperation: PendingOperation?
@@ -388,6 +390,12 @@ final class TranslationCoordinator: ObservableObject {
     }
 
     private func cancelOutstandingOperations() {
+        let availability = availabilityRequests
+        availabilityRequests.removeAll()
+        for request in availability.values {
+            request.cancel()
+            request.task.cancel()
+        }
         if let activeOperation { cancel(activeOperation) }
         let cancelBackend = cancelActiveBackend
         cancelActiveBackend = nil
@@ -578,17 +586,38 @@ final class TranslationCoordinator: ObservableObject {
         )
     }
 
+    private func cancelAvailability(id: UUID) {
+        guard let request = availabilityRequests.removeValue(forKey: id) else { return }
+        request.cancel()
+        request.task.cancel()
+    }
+
     private func availabilityStatus(for pair: LanguagePair) async throws -> LanguageAvailability.Status {
-        guard #available(macOS 15.0, *) else {
-            throw ServiceError.unavailableOnSystem
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LanguageAvailability.Status, Error>) in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                let completion = OperationCompletion(continuation)
+                let task = Task { [weak self] in
+                    guard let self else {
+                        completion.resume(throwing: CancellationError())
+                        return
+                    }
+                    let status = await self.availability(pair.source, pair.target)
+                    guard self.availabilityRequests.removeValue(forKey: id) != nil else { return }
+                    if status == .unsupported {
+                        completion.resume(throwing: ServiceError.unsupportedPair(pair.source, pair.target))
+                    } else {
+                        completion.resume(returning: status)
+                    }
+                }
+                availabilityRequests[id] = (task, { completion.resume(throwing: CancellationError()) })
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancelAvailability(id: id) }
         }
-
-        let availabilityStatus = await availability(pair.source, pair.target)
-
-        guard availabilityStatus != .unsupported else {
-            throw ServiceError.unsupportedPair(pair.source, pair.target)
-        }
-
-        return availabilityStatus
     }
 }

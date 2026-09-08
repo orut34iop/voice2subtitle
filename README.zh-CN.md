@@ -79,9 +79,20 @@ open v2s.xcodeproj
 也可以直接使用终端构建：
 
 ```bash
-xcodebuild -project v2s.xcodeproj -scheme v2s -configuration Debug build
+./scripts/build.sh Debug
 ```
 
 ## 许可证
 
 MIT
+
+## 开发验证
+
+`./scripts/build.sh Release` 构建 macOS arm64 应用到 `.build/app/Build/Products/Release/v2s.app`。构建脚本会以本机当前时间生成 `yyyyMMddHHmm` 构建号，并同步 Xcode 配置与 AppModel。
+
+- `./scripts/test.sh`：运行 Xcode 应用测试目标。测试宿主不会启动更新器或争用正式应用实例。
+- `./scripts/test.sh --swiftpm`：运行相同的 SwiftPM 测试。
+- `python3 scripts/verify-project.py`：校验两个构建入口的源码与测试文件注册一致。
+- `python3 -m unittest discover -s Tests/BuildTools`：验证构建号同步和发布版本校验。
+
+CI 会运行两个测试入口并构建 arm64 发布版；发布工作流在打包前执行回归测试。转写记录独立于字幕显示队列，长记录摘要会分段处理再汇总，摘要视图标明覆盖时间。

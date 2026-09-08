@@ -24,3 +24,20 @@ final class TranscriptStoreTests: XCTestCase {
         XCTAssertTrue(store.entries.isEmpty)
     }
 }
+
+extension TranscriptStoreTests {
+    @MainActor
+    func testOneHourRecordAndTranslationBackfillPerformance() {
+        let entries = (0..<3600).map { index in
+            TranscriptEntry(id: UUID(), sourceText: "Meeting sentence \(index): decisions and follow-up actions.", translatedText: "")
+        }
+        let store = TranscriptStore()
+        measure {
+            store.clear()
+            for entry in entries { store.upsert(entry) }
+            for entry in entries { store.updateTranslation(id: entry.id, text: "Translated meeting sentence.") }
+        }
+        XCTAssertEqual(store.entries.count, 3600)
+        XCTAssertTrue(store.entries.allSatisfy { !$0.translatedText.isEmpty })
+    }
+}

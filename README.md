@@ -86,9 +86,20 @@ open v2s.xcodeproj
 Or from the terminal:
 
 ```bash
-xcodebuild -project v2s.xcodeproj -scheme v2s -configuration Debug build
+./scripts/build.sh Debug
 ```
 
 ## License
 
 MIT
+
+## Development checks
+
+`./scripts/build.sh Release` builds the macOS arm64 app at `.build/app/Build/Products/Release/v2s.app`. Build scripts stamp the local build time (`yyyyMMddHHmm`) into both the Xcode project and AppModel.
+
+- `./scripts/test.sh`: run the Xcode app test target; its host skips update checks and production instance locking.
+- `./scripts/test.sh --swiftpm`: run the same SwiftPM regression tests.
+- `python3 scripts/verify-project.py`: check source and test registration parity between build systems.
+- `python3 -m unittest discover -s Tests/BuildTools`: verify build timestamp and release version validation.
+
+CI runs both test entry points and builds the arm64 release app. Releases run regression tests before packaging. Full transcripts are independent of the live display queue; long summaries are generated in chunks and show their coverage time.

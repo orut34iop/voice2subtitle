@@ -158,6 +158,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
     private var activeLocaleIdentifier: String?
     private var interfaceLanguageID = "en"
     private var modernAnalyzerTask: Task<Void, Never>?
+    private var analyzerShutdownTask: Task<Void, Never>?
     private var modernResultsTask: Task<Void, Never>?
     private var lastModernCommittedResultIdentity: String?
     private var speechAnalyzerState: AnyObject?
@@ -309,12 +310,13 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     func stopAndWait() async {
         cancellation.cancel()
-        await withCheckedContinuation { continuation in
+        let shutdown = await withCheckedContinuation { (continuation: CheckedContinuation<Task<Void, Never>?, Never>) in
             captureQueue.async {
                 self.stopOnCaptureQueue()
-                continuation.resume()
+                continuation.resume(returning: self.analyzerShutdownTask)
             }
         }
+        await shutdown?.value
     }
 
     private func stopOnCaptureQueue() {
@@ -585,7 +587,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
             analyzerInputFormat = nil
 
             if let analyzer {
-                Task {
+                analyzerShutdownTask = Task {
                     await analyzer.cancelAndFinishNow()
                 }
             }
@@ -2426,176 +2428,6 @@ extension LiveTranscriptionSession: AVCaptureAudioDataOutputSampleBufferDelegate
     }
 }
 
-private final class ApplicationAudioCapture {
-    enum CaptureError: Error {
-        case permissionDenied
-        case missingOutputDevice
-        case tapFormatUnavailable
-        case failed(stage: String, status: OSStatus)
-    }
-
-    private let appName: String
-    private let processObjectIDs: [AudioObjectID]
-    private let readStreamFailureMessage: String
-    private let queue: DispatchQueue
-    private let audioHandler: (AVAudioPCMBuffer) -> Void
-    private let errorHandler: (String) -> Void
-
-    private let system = AudioHardwareSystem.shared
-    private var processTap: AudioHardwareTap?
-    private var aggregateDevice: AudioHardwareAggregateDevice?
-    private var deviceIOProcID: AudioDeviceIOProcID?
-    private var tapFormat: AVAudioFormat?
-
-    init(
-        appName: String,
-        processObjectIDs: [AudioObjectID],
-        readStreamFailureMessage: String,
-        queue: DispatchQueue,
-        audioHandler: @escaping (AVAudioPCMBuffer) -> Void,
-        errorHandler: @escaping (String) -> Void
-    ) {
-        self.appName = appName
-        self.processObjectIDs = processObjectIDs
-        self.readStreamFailureMessage = readStreamFailureMessage
-        self.queue = queue
-        self.audioHandler = audioHandler
-        self.errorHandler = errorHandler
-    }
-
-    func start() throws {
-        do {
-            let tapDescription = CATapDescription(monoMixdownOfProcesses: processObjectIDs)
-            tapDescription.uuid = UUID()
-            tapDescription.muteBehavior = .unmuted
-            tapDescription.isPrivate = true
-            tapDescription.name = "v2s \(appName)"
-
-            guard let processTap = try system.makeProcessTap(description: tapDescription) else {
-                throw CaptureError.failed(stage: "create the process tap", status: kAudioHardwareIllegalOperationError)
-            }
-
-            self.processTap = processTap
-
-            guard let outputDevice = try system.defaultOutputDevice else {
-                throw CaptureError.missingOutputDevice
-            }
-
-            let outputUID = try outputDevice.uid
-            let aggregateDescription: [String: Any] = [
-                kAudioAggregateDeviceNameKey: "v2s-\(appName)",
-                kAudioAggregateDeviceUIDKey: UUID().uuidString,
-                kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-                kAudioAggregateDeviceIsPrivateKey: true,
-                kAudioAggregateDeviceIsStackedKey: false,
-                kAudioAggregateDeviceTapAutoStartKey: true,
-                kAudioAggregateDeviceSubDeviceListKey: [
-                    [
-                        kAudioSubDeviceUIDKey: outputUID
-                    ]
-                ],
-                kAudioAggregateDeviceTapListKey: [
-                    [
-                        kAudioSubTapDriftCompensationKey: true,
-                        kAudioSubTapUIDKey: try processTap.uid
-                    ]
-                ]
-            ]
-
-            guard let aggregateDevice = try system.makeAggregateDevice(description: aggregateDescription) else {
-                throw CaptureError.failed(stage: "create the aggregate device", status: kAudioHardwareIllegalOperationError)
-            }
-
-            self.aggregateDevice = aggregateDevice
-
-            var streamDescription = try processTap.format
-            guard let tapFormat = AVAudioFormat(streamDescription: &streamDescription) else {
-                throw CaptureError.tapFormatUnavailable
-            }
-
-            self.tapFormat = tapFormat
-
-            var deviceIOProcID: AudioDeviceIOProcID?
-            let createIOProcStatus = AudioDeviceCreateIOProcIDWithBlock(
-                &deviceIOProcID,
-                aggregateDevice.id,
-                queue
-            ) { [weak self] _, inputData, _, _, _ in
-                guard let self else {
-                    return
-                }
-
-                self.handleCapturedAudio(inputData)
-            }
-
-            guard createIOProcStatus == noErr, let deviceIOProcID else {
-                throw CaptureError.failed(stage: "create the capture callback", status: createIOProcStatus)
-            }
-
-            self.deviceIOProcID = deviceIOProcID
-
-            let startStatus = AudioDeviceStart(aggregateDevice.id, deviceIOProcID)
-            guard startStatus == noErr else {
-                throw CaptureError.failed(stage: "start app audio capture", status: startStatus)
-            }
-        } catch let error as AudioHardwareError {
-            stop()
-
-            if error.error == permErr {
-                throw CaptureError.permissionDenied
-            }
-
-            throw CaptureError.failed(stage: "configure app audio capture", status: error.error)
-        } catch {
-            stop()
-            throw error
-        }
-    }
-
-    func stop() {
-        if let aggregateDevice, let deviceIOProcID {
-            AudioDeviceStop(aggregateDevice.id, deviceIOProcID)
-            AudioDeviceDestroyIOProcID(aggregateDevice.id, deviceIOProcID)
-        }
-
-        deviceIOProcID = nil
-
-        if let aggregateDevice {
-            try? system.destroyAggregateDevice(aggregateDevice)
-        }
-
-        aggregateDevice = nil
-
-        if let processTap {
-            try? system.destroyProcessTap(processTap)
-        }
-
-        processTap = nil
-        tapFormat = nil
-    }
-
-    private func handleCapturedAudio(_ inputData: UnsafePointer<AudioBufferList>) {
-        guard let tapFormat,
-              inputData.pointee.mNumberBuffers > 0,
-              inputData.pointee.mBuffers.mDataByteSize > 0 else {
-            return
-        }
-
-        let mutableAudioBufferList = UnsafeMutablePointer<AudioBufferList>(mutating: inputData)
-
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: tapFormat,
-            bufferListNoCopy: mutableAudioBufferList,
-            deallocator: nil
-        ) else {
-            errorHandler(readStreamFailureMessage)
-            return
-        }
-
-        audioHandler(buffer)
-    }
-}
-
 private struct AudioFormatSignature: Equatable {
     let sampleRate: Double
     let channelCount: AVAudioChannelCount
@@ -2623,100 +2455,6 @@ private extension InputSource {
         }
 
         return pid_t(detail.dropFirst(4))
-    }
-}
-
-private struct ApplicationProcessAssociation {
-    let bundleIdentifier: String?
-    let applicationBundleURL: URL?
-    let helperBundlePrefixes: [String]
-    let helperPathFragments: [String]
-
-    init(runningApplication: NSRunningApplication) {
-        self.bundleIdentifier = runningApplication.bundleIdentifier
-        self.applicationBundleURL = runningApplication.bundleURL?.standardizedFileURL
-
-        var helperBundlePrefixes: [String] = []
-        var helperPathFragments: [String] = []
-
-        if let bundleIdentifier = runningApplication.bundleIdentifier {
-            helperBundlePrefixes.append(bundleIdentifier)
-
-            switch bundleIdentifier {
-            case "com.apple.Safari":
-                helperBundlePrefixes.append(contentsOf: [
-                    "com.apple.WebKit.",
-                    "com.apple.Safari"
-                ])
-                helperPathFragments.append(contentsOf: [
-                    "/WebKit.framework/",
-                    "/SafariPlatformSupport.framework/",
-                    "/Safari.app/"
-                ])
-            case "com.google.Chrome":
-                helperPathFragments.append(contentsOf: [
-                    "/Google Chrome.app/",
-                    "Google Chrome Helper"
-                ])
-            case "org.chromium.Chromium":
-                helperPathFragments.append(contentsOf: [
-                    "/Chromium.app/",
-                    "Chromium Helper"
-                ])
-            case "com.microsoft.edgemac":
-                helperPathFragments.append(contentsOf: [
-                    "/Microsoft Edge.app/",
-                    "Microsoft Edge Helper"
-                ])
-            case "com.brave.Browser":
-                helperPathFragments.append(contentsOf: [
-                    "/Brave Browser.app/",
-                    "Brave Browser Helper"
-                ])
-            case "org.mozilla.firefox":
-                helperPathFragments.append(contentsOf: [
-                    "/Firefox.app/",
-                    "plugin-container"
-                ])
-            default:
-                break
-            }
-        }
-
-        self.helperBundlePrefixes = Array(Set(helperBundlePrefixes))
-        self.helperPathFragments = Array(Set(helperPathFragments))
-    }
-
-    func matchesExactBundleIdentifier(_ candidate: String) -> Bool {
-        guard let bundleIdentifier else {
-            return false
-        }
-
-        return candidate == bundleIdentifier
-    }
-
-    func matchesApplicationBundleURL(_ candidate: URL?) -> Bool {
-        guard let applicationBundleURL else {
-            return false
-        }
-
-        return candidate == applicationBundleURL
-    }
-
-    func matchesHelperBundleIdentifier(_ candidate: String) -> Bool {
-        guard candidate.isEmpty == false else {
-            return false
-        }
-
-        return helperBundlePrefixes.contains(where: { candidate.hasPrefix($0) })
-    }
-
-    func matchesHelperExecutablePath(_ candidate: String?) -> Bool {
-        guard let candidate, candidate.isEmpty == false else {
-            return false
-        }
-
-        return helperPathFragments.contains(where: { candidate.contains($0) })
     }
 }
 
@@ -2795,46 +2533,6 @@ private extension OSStatus {
         }
 
         return String(bytes: scalarValues, encoding: .ascii)
-    }
-}
-
-private func executablePath(forProcessID processID: pid_t) -> String? {
-    let pathBuffer = UnsafeMutablePointer<CChar>.allocate(capacity: Int(MAXPATHLEN))
-    defer {
-        pathBuffer.deallocate()
-    }
-
-    let pathLength = proc_pidpath(processID, pathBuffer, UInt32(MAXPATHLEN))
-    guard pathLength > 0 else {
-        return nil
-    }
-
-    return String(cString: pathBuffer)
-}
-
-private func applicationBundleURL(forProcessID processID: pid_t) -> URL? {
-    guard let executablePath = executablePath(forProcessID: processID) else {
-        return nil
-    }
-
-    return URL(fileURLWithPath: executablePath).owningApplicationBundleURL()
-}
-
-private extension URL {
-    func owningApplicationBundleURL(maxDepth: Int = 16) -> URL? {
-        var depth = 0
-        var currentURL = standardizedFileURL
-
-        while depth < maxDepth {
-            if currentURL.pathExtension == "app" {
-                return currentURL.standardizedFileURL
-            }
-
-            currentURL = currentURL.deletingLastPathComponent()
-            depth += 1
-        }
-
-        return nil
     }
 }
 
