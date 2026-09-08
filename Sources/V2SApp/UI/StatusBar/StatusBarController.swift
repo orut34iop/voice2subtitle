@@ -61,6 +61,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         let symbolName: String
 
         switch state {
+        case .starting, .stopping:
+            symbolName = "hourglass"
         case .idle:
             symbolName = "captions.bubble"
         case .running:

@@ -129,6 +129,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         }
     }
 
+    private let cancellation = CaptureCancellation()
     private let captureQueue = DispatchQueue(label: "com.franklioxygen.v2s.capture", qos: .userInitiated)
     private let processingFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
@@ -169,9 +170,9 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
     private var microphoneCaptureSession: AVCaptureSession?
     private var applicationAudioCapture: ApplicationAudioCapture?
 
-    private var transcriptHandler: (@MainActor (RecognizedSentence) -> Void)?
-    private var partialHandler: (@MainActor (DraftSegment?) -> Void)?
-    private var errorHandler: (@MainActor (String) -> Void)?
+    @MainActor private var transcriptHandler: (@MainActor (RecognizedSentence) -> Void)?
+    @MainActor private var partialHandler: (@MainActor (DraftSegment?) -> Void)?
+    @MainActor private var errorHandler: (@MainActor (String) -> Void)?
     @MainActor private var recentCommittedSentenceHistory: [RecentCommittedSentence] = []
 
     private func localized(_ key: AppTextKey, _ arguments: CVarArg...) -> String {
@@ -213,6 +214,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         try await withCheckedThrowingContinuation { continuation in
             captureQueue.async {
                 do {
+                    try self.checkActive()
                     continuation.resume(returning: try operation())
                 } catch {
                     continuation.resume(throwing: error)
@@ -236,18 +238,48 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         partialHandler: @escaping @MainActor (DraftSegment?) -> Void,
         errorHandler: @escaping @MainActor (String) -> Void
     ) async throws {
-        self.transcriptHandler = transcriptHandler
-        self.partialHandler = partialHandler
-        self.modeConfig = modeConfig
-        self.recognitionContextualStrings = sanitizeContextualStrings(contextualStrings)
-        self.activeLocaleIdentifier = localeIdentifier
-        self.interfaceLanguageID = interfaceLanguageID
-        self.errorHandler = errorHandler
+        try await withTaskCancellationHandler {
+            try await startInternal(
+                source: source, localeIdentifier: localeIdentifier,
+                interfaceLanguageID: interfaceLanguageID, modeConfig: modeConfig,
+                contextualStrings: contextualStrings, transcriptHandler: transcriptHandler,
+                partialHandler: partialHandler, errorHandler: errorHandler
+            )
+        } onCancel: {
+            self.stop()
+        }
+    }
+
+    private func checkActive() throws {
+        if cancellation.isCancelled || Task.isCancelled { throw CancellationError() }
+    }
+
+    private func startInternal(
+        source: InputSource,
+        localeIdentifier: String,
+        interfaceLanguageID: String,
+        modeConfig: ModeConfig = .balanced,
+        contextualStrings: [String] = [],
+        transcriptHandler: @escaping @MainActor (RecognizedSentence) -> Void,
+        partialHandler: @escaping @MainActor (DraftSegment?) -> Void,
+        errorHandler: @escaping @MainActor (String) -> Void
+    ) async throws {
+        try checkActive()
         await MainActor.run {
+            self.transcriptHandler = transcriptHandler
+            self.partialHandler = partialHandler
+            self.errorHandler = errorHandler
             recentCommittedSentenceHistory.removeAll()
+        }
+        try await runOnCaptureQueue {
+            self.modeConfig = modeConfig
+            self.recognitionContextualStrings = self.sanitizeContextualStrings(contextualStrings)
+            self.activeLocaleIdentifier = localeIdentifier
+            self.interfaceLanguageID = interfaceLanguageID
         }
 
         try await requestRequiredPermissions(for: source)
+        try checkActive()
         if try await configureModernSpeechRecognizer(localeIdentifier: localeIdentifier) == false {
             try await runOnCaptureQueue {
                 try self.configureSpeechRecognizer(localeIdentifier: localeIdentifier)
@@ -270,12 +302,23 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
     }
 
     func stop() {
-        captureQueue.async { [weak self] in
-            self?.stopOnCaptureQueue()
+        cancellation.cancel()
+        // The queue owns self until teardown completes; releasing the caller cannot skip it.
+        captureQueue.async { self.stopOnCaptureQueue() }
+    }
+
+    func stopAndWait() async {
+        cancellation.cancel()
+        await withCheckedContinuation { continuation in
+            captureQueue.async {
+                self.stopOnCaptureQueue()
+                continuation.resume()
+            }
         }
     }
 
     private func stopOnCaptureQueue() {
+        recognitionGeneration &+= 1
         cancelSilenceTimer()
         cancelVADSilenceTimer()
 
@@ -299,9 +342,11 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         lastVADProbability = 0
 
         resetModernTranscriptionState()
-        partialHandler = nil
         resetDraftState()
         Task { @MainActor [weak self] in
+            self?.transcriptHandler = nil
+            self?.partialHandler = nil
+            self?.errorHandler = nil
             self?.recentCommittedSentenceHistory.removeAll()
         }
     }
@@ -406,7 +451,8 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         do {
             return try await configureSpeechAnalyzerRecognizer(localeIdentifier: localeIdentifier)
         } catch {
-            stopModernSpeechRecognizer()
+            try checkActive()
+            try await runOnCaptureQueue { self.stopModernSpeechRecognizer() }
             return false
         }
     }
@@ -441,57 +487,64 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         ) ?? processingFormat
         try await analyzer.prepareToAnalyze(in: preferredFormat)
 
-        let inputStream = AsyncStream<AnalyzerInput>(bufferingPolicy: .bufferingNewest(12)) { continuation in
-            self.analyzerInputContinuationState = continuation
-        }
-
-        modernResultsTask?.cancel()
-        modernResultsTask = Task { [weak self] in
-            do {
-                for try await result in transcriber.results {
-                    self?.captureQueue.async { [weak self] in
-                        self?.processModernRecognitionResult(result)
-                    }
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                self?.fallbackFromSpeechAnalyzer(error)
-            }
-        }
-
-        modernAnalyzerTask?.cancel()
-        modernAnalyzerTask = Task { [weak self] in
-            do {
-                try await analyzer.start(inputSequence: inputStream)
-            } catch is CancellationError {
-                return
-            } catch {
-                self?.fallbackFromSpeechAnalyzer(error)
-            }
-        }
-
-        speechAnalyzerState = analyzer
-        speechTranscriberState = transcriber
-        analyzerInputFormat = preferredFormat
-        recognitionBackend = .speechAnalyzer
-        recognitionRequest = nil
-        recognitionTask = nil
-        speechRecognizer = nil
-        audioConverter = nil
-        audioConverterInputSignature = nil
-        resetLegacyTranscriptionState()
-        resetModernTranscriptionState()
-        cancelSilenceTimer()
-        cancelVADSilenceTimer()
-        resetDraftState()
-        lastModernCommittedResultIdentity = nil
-
-        // Initialize Silero VAD engine for draft confidence / silence scoring only.
         do {
-            vadEngine = try SessionVADEngine()
+            try await runOnCaptureQueue {
+            let inputStream = AsyncStream<AnalyzerInput>(bufferingPolicy: .bufferingNewest(12)) { continuation in
+                self.analyzerInputContinuationState = continuation
+            }
+
+            self.modernResultsTask?.cancel()
+            self.modernResultsTask = Task { [weak self] in
+                do {
+                    for try await result in transcriber.results {
+                        self?.captureQueue.async { [weak self] in
+                            self?.processModernRecognitionResult(result)
+                        }
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self?.fallbackFromSpeechAnalyzer(error)
+                }
+            }
+
+            self.modernAnalyzerTask?.cancel()
+            self.modernAnalyzerTask = Task { [weak self] in
+                do {
+                    try await analyzer.start(inputSequence: inputStream)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self?.fallbackFromSpeechAnalyzer(error)
+                }
+            }
+
+            self.speechAnalyzerState = analyzer
+            self.speechTranscriberState = transcriber
+            self.analyzerInputFormat = preferredFormat
+            self.recognitionBackend = .speechAnalyzer
+            self.recognitionRequest = nil
+            self.recognitionTask = nil
+            self.speechRecognizer = nil
+            self.audioConverter = nil
+            self.audioConverterInputSignature = nil
+            self.resetLegacyTranscriptionState()
+            self.resetModernTranscriptionState()
+            self.cancelSilenceTimer()
+            self.cancelVADSilenceTimer()
+            self.resetDraftState()
+            self.lastModernCommittedResultIdentity = nil
+
+            // Initialize Silero VAD engine for draft confidence / silence scoring only.
+            do {
+                self.vadEngine = try SessionVADEngine()
+            } catch {
+                self.vadEngine = nil
+            }
+            }
         } catch {
-            vadEngine = nil
+            await analyzer.cancelAndFinishNow()
+            throw error
         }
 
         return true
@@ -795,6 +848,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
     }
 
     private func append(audioBuffer: AVAudioPCMBuffer) {
+        guard !cancellation.isCancelled else { return }
         guard audioBuffer.frameLength > 0 else {
             return
         }
@@ -1092,6 +1146,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     @MainActor
     private func emitRecognizedSentence(_ sentence: RecognizedSentence) {
+        guard !cancellation.isCancelled else { return }
         transcriptHandler?(sentence)
     }
 
@@ -1202,11 +1257,13 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     @MainActor
     private func emitPartialDraft(_ draft: DraftSegment?) {
+        guard !cancellation.isCancelled else { return }
         partialHandler?(draft)
     }
 
     @MainActor
     private func emitError(_ message: String) {
+        guard !cancellation.isCancelled else { return }
         errorHandler?(message)
     }
 
@@ -1718,6 +1775,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     @available(macOS 26.0, *)
     private func processModernRecognitionResult(_ result: SpeechTranscriber.Result) {
+        guard !cancellation.isCancelled, recognitionBackend == .speechAnalyzer else { return }
         let now = Date()
         lastRecognitionResultTime = now
         let fullText = normalizedTranscriberText(result.text)
@@ -2777,5 +2835,21 @@ private extension URL {
         }
 
         return nil
+    }
+}
+
+/// Checked across the caller, MainActor, and capture queue; sessions are single-use.
+private final class CaptureCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
     }
 }

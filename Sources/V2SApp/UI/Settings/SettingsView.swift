@@ -88,6 +88,7 @@ struct SettingsView: View {
 
     private var sessionDotColor: Color {
         switch model.sessionState {
+        case .starting, .stopping: return .orange
         case .idle: return .secondary
         case .running: return .green
         case .error: return .red

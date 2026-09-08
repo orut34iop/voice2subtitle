@@ -47,6 +47,9 @@
 		A0000000000000000000008E /* PopoverOutsideClickMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008F /* PopoverOutsideClickMonitor.swift */; };
 		A00000000000000000000090 /* SentenceBoundaryHeuristics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000091 /* SentenceBoundaryHeuristics.swift */; };
 		A00000000000000000000092 /* ModelResource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000093 /* ModelResource.swift */; };
+		78CC3080FA114C5E683DFB1A /* SessionLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E88598656FA50EB646DF57C /* SessionLifecycle.swift */; };
+		32D6505E3F4D621671A5AADD /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67970C664F8CE8D33D78092D /* TranscriptStore.swift */; };
+		020CD62BB830621AD754EA3D /* TranslationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2807AE075EDA2F4BEAB71D6 /* TranslationCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -90,6 +93,9 @@
 		A0000000000000000000008F /* PopoverOutsideClickMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverOutsideClickMonitor.swift; sourceTree = "<group>"; };
 		A00000000000000000000091 /* SentenceBoundaryHeuristics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceBoundaryHeuristics.swift; sourceTree = "<group>"; };
 		A00000000000000000000093 /* ModelResource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelResource.swift; sourceTree = "<group>"; };
+		1E88598656FA50EB646DF57C /* SessionLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/V2SApp/Services/SessionLifecycle.swift"; sourceTree = SOURCE_ROOT; };
+		67970C664F8CE8D33D78092D /* TranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/V2SApp/Services/TranscriptStore.swift"; sourceTree = SOURCE_ROOT; };
+		C2807AE075EDA2F4BEAB71D6 /* TranslationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/V2SApp/Services/TranslationCoordinator.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +114,9 @@
 		A00000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
+				C2807AE075EDA2F4BEAB71D6 /* TranslationCoordinator.swift */,
+				67970C664F8CE8D33D78092D /* TranscriptStore.swift */,
+				1E88598656FA50EB646DF57C /* SessionLifecycle.swift */,
 				A0000000000000000000000B /* Sources */,
 				A00000000000000000000014 /* Config */,
 				A00000000000000000000070 /* Assets.xcassets */,
@@ -360,6 +369,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				020CD62BB830621AD754EA3D /* TranslationCoordinator.swift in Sources */,
+				32D6505E3F4D621671A5AADD /* TranscriptStore.swift in Sources */,
+				78CC3080FA114C5E683DFB1A /* SessionLifecycle.swift in Sources */,
 				A00000000000000000000071 /* DockVisibilityController.swift in Sources */,
 				A00000000000000000000072 /* SessionActionButtonLabel.swift in Sources */,
 				A00000000000000000000076 /* AppLocalization.swift in Sources */,
@@ -438,7 +450,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202607141338;
+				CURRENT_PROJECT_VERSION = 202609081515;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;
@@ -467,7 +479,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202607141338;
+				CURRENT_PROJECT_VERSION = 202609081515;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;
