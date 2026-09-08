@@ -86,7 +86,8 @@ struct StatusBarPopoverView: View {
             sectionHeader(model.localized(.inputSource), icon: "mic.fill")
             SettingsControlRow(label: model.localized(.sourceShort)) {
                 SourceMultiSelectPicker(
-                    sources: model.allSources,
+                    sources: model.sourceSelectionOptions,
+                    unavailableSourceIDs: Set(model.unavailableSelectedSources.map(\.id)),
                     interfaceLanguageID: model.resolvedInterfaceLanguageID,
                     emptyTitle: model.allSources.isEmpty ? model.localized(.noSources) : model.localized(.choose),
                     selection: model.selectedSourcesBinding

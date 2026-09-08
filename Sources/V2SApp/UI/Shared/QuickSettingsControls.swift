@@ -92,6 +92,7 @@ struct SourceMenuPicker: View {
 
 struct SourceMultiSelectPicker: View {
     let sources: [InputSource]
+    let unavailableSourceIDs: Set<String>
     let interfaceLanguageID: String
     let emptyTitle: String
     @Binding var selection: Set<String>
@@ -224,7 +225,7 @@ struct SourceMultiSelectPicker: View {
                                         Image(systemName: selection.contains(source.id) ? "checkmark" : "")
                                             .frame(width: 12, alignment: .leading)
                                             .foregroundStyle(Color.accentColor)
-                                        Text("\(source.category.displayName(in: interfaceLanguageID)) · \(source.name)")
+                                        Text("\(source.category.displayName(in: interfaceLanguageID)) · \(sourceTitle(source))")
                                             .font(.callout)
                                             .foregroundStyle(.primary)
                                             .lineLimit(1)
@@ -258,13 +259,20 @@ struct SourceMultiSelectPicker: View {
         .fixedSize(horizontal: false, vertical: false)
     }
 
+    private func sourceTitle(_ source: InputSource) -> String {
+        unavailableSourceIDs.contains(source.id)
+            ? AppLocalization.formattedString(.sourceUnavailableFormat,
+                languageID: interfaceLanguageID, arguments: [source.name])
+            : source.name
+    }
+
     private var menuTitle: String {
         let selected = sources.filter { selection.contains($0.id) }
         switch selected.count {
         case 0:
             return emptyTitle
         case 1:
-            return selected[0].name
+            return sourceTitle(selected[0])
         default:
             if isAllSourcesSelected {
                 return AppLocalization.string(.allSources, languageID: interfaceLanguageID)
@@ -376,13 +384,6 @@ extension AppModel {
         Binding(
             get: { self.selectedSourceIDs },
             set: { self.selectedSourceIDs = $0 }
-        )
-    }
-
-    var selectedSourceOptionalBinding: Binding<String?> {
-        Binding(
-            get: { self.selectedSourceID },
-            set: { self.selectedSourceID = $0 }
         )
     }
 

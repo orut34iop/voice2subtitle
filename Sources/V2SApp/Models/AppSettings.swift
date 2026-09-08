@@ -3,6 +3,7 @@ import Foundation
 struct AppSettings: Codable {
     var selectedSourceID: String?
     var selectedSourceIDs: [String]
+    var sourceSelectionDetails: [InputSource]
     var sourceLanguageOverrides: [String: String]
     var sourceOutputLanguageOverrides: [String: String]
     var inputLanguageID: String
@@ -36,6 +37,7 @@ struct AppSettings: Codable {
         selectedSourceIDs = (try? c.decodeIfPresent([String].self, forKey: .selectedSourceIDs))
             ?? selectedSourceID.map { [$0] }
             ?? AppSettings.default.selectedSourceIDs
+        sourceSelectionDetails = (try? c.decode([InputSource].self, forKey: .sourceSelectionDetails)) ?? []
         sourceLanguageOverrides = (try? c.decodeIfPresent([String: String].self, forKey: .sourceLanguageOverrides))
             ?? AppSettings.default.sourceLanguageOverrides
         sourceOutputLanguageOverrides = (try? c.decodeIfPresent([String: String].self, forKey: .sourceOutputLanguageOverrides))
@@ -60,6 +62,7 @@ struct AppSettings: Codable {
     init(
         selectedSourceID: String?,
         selectedSourceIDs: [String] = [],
+        sourceSelectionDetails: [InputSource] = [],
         sourceLanguageOverrides: [String: String] = [:],
         sourceOutputLanguageOverrides: [String: String] = [:],
         inputLanguageID: String,
@@ -73,6 +76,7 @@ struct AppSettings: Codable {
     ) {
         self.selectedSourceID = selectedSourceID
         self.selectedSourceIDs = selectedSourceIDs
+        self.sourceSelectionDetails = sourceSelectionDetails
         self.sourceLanguageOverrides = sourceLanguageOverrides
         self.sourceOutputLanguageOverrides = sourceOutputLanguageOverrides
         self.inputLanguageID  = inputLanguageID

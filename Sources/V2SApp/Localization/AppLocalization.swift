@@ -147,6 +147,8 @@ enum AppTextKey: String {
     case modeReadingTradeoff
     case ready
     case runningOnFormat
+    case sourceUnavailableFormat
+    case selectedSourcesUnavailableFormat
     case chooseInputSourceBeforeStarting
     case checkingLanguageResources
     case downloadRequiredLanguageResourcesSystemSettings
@@ -336,6 +338,8 @@ enum AppLocalization {
 
     private static let tables: [String: [String: String]] = [
         "en": [
+            "sourceUnavailableFormat": "%@ (unavailable)",
+            "selectedSourcesUnavailableFormat": "Selected sources unavailable: %@. Open the app or reconnect the device, then refresh; your selection is preserved.",
             "summaryThroughFormat": "Summary through %@",
             "start": "Start",
             "stop": "Stop",
@@ -546,6 +550,8 @@ enum AppLocalization {
             "checkForUpdates": "Check for Updates",
         ],
         "zh-Hans": [
+            "sourceUnavailableFormat": "%@（暂不可用）",
+            "selectedSourcesUnavailableFormat": "已选音源暂不可用：%@。请打开应用或连接设备后刷新；原选择已保留。",
             "summaryThroughFormat": "摘要截至 %@ 的记录",
             "start": "开始",
             "stop": "停止",

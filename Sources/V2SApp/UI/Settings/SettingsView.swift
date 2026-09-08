@@ -118,7 +118,8 @@ struct SettingsView: View {
                     sectionHeader(model.localized(.inputSource), icon: "mic.fill")
                     SettingsControlRow(label: model.localized(.selectedSource)) {
                         SourceMultiSelectPicker(
-                            sources: model.allSources,
+                            sources: model.sourceSelectionOptions,
+                            unavailableSourceIDs: Set(model.unavailableSelectedSources.map(\.id)),
                             interfaceLanguageID: model.resolvedInterfaceLanguageID,
                             emptyTitle: model.allSources.isEmpty
                                 ? model.localized(.noSourcesDetected)
@@ -551,7 +552,7 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var selectedSourceLanguageRows: some View {
-        let sources = model.selectedSources
+        let sources = model.sourceSelectionOptions.filter { model.selectedSourceIDs.contains($0.id) }
         if sources.isEmpty == false {
             ForEach(sources) { source in
                 Divider()

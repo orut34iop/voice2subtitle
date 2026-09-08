@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var singleInstanceWakeObserver: NSObjectProtocol?
     private var singleInstanceLockDescriptor: Int32 = -1
     private var sourceRefreshTimer: Timer?
+    private var didInitializeApplication = false
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -37,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        didInitializeApplication = true
         NSApp.setActivationPolicy(.accessory)
 
         let settingsWindowController = SettingsWindowController(
@@ -307,16 +309,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         guard ProcessInfo.processInfo.environment["V2S_TESTING"] != "1" else { return }
+        // A duplicate instance must not initialize a model or overwrite the owner's settings on exit.
+        guard didInitializeApplication else {
+            releaseSingleInstanceLock()
+            return
+        }
         if let singleInstanceWakeObserver {
             DistributedNotificationCenter.default().removeObserver(singleInstanceWakeObserver)
             self.singleInstanceWakeObserver = nil
         }
-        releaseSingleInstanceLock()
         sourceRefreshTimer?.invalidate()
         sourceRefreshTimer = nil
         cancellables.removeAll()
         appModel.persistSettings()
         appModel.flushSettings()
+        // The next owner may read only after the final snapshot has reached disk.
+        releaseSingleInstanceLock()
     }
 }
 

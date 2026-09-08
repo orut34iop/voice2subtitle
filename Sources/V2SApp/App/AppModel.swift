@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202609081547"
+    static let buildNumber = "202609081609"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -24,6 +24,7 @@ final class AppModel: ObservableObject {
 
     private let settingsStore: SettingsStore
     private let sourceCatalogService: SourceCatalogService
+    private var savedSourceDetails: [String: InputSource] = [:]
     let translationCoordinator = TranslationCoordinator()
     private let glossaryService = GlossaryService()
     let transcriptStore = TranscriptStore()
@@ -81,7 +82,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var overlayHistoryVisibleCount = 0
     @Published private(set) var overlayHistoryScrollOffset = 0
 
-    @Published var selectedSourceID: String? {
+    @Published private(set) var selectedSourceID: String? {
         didSet {
             persistSettings()
             syncOverlayPreviewIfNeeded()
@@ -90,11 +91,14 @@ final class AppModel: ObservableObject {
 
     @Published var selectedSourceIDs: Set<String> {
         didSet {
+            guard oldValue != selectedSourceIDs else { return }
             let primarySourceID = preferredPrimarySourceID(for: selectedSourceIDs)
             if selectedSourceID != primarySourceID {
                 selectedSourceID = primarySourceID
             }
             persistSettings()
+            // Checkboxes are discrete choices: make them durable immediately, including an empty set.
+            if !isBootstrapping { settingsStore.flush() }
             syncOverlayPreviewIfNeeded()
         }
     }
@@ -184,12 +188,15 @@ final class AppModel: ObservableObject {
         self.sourceCatalogService = sourceCatalogService
 
         let settings = settingsStore.load()
-        self.selectedSourceID = settings.selectedSourceID
-        var initialSelectedSourceIDs = Set(settings.selectedSourceIDs)
-        if initialSelectedSourceIDs.isEmpty, let selectedSourceID = settings.selectedSourceID {
-            initialSelectedSourceIDs = [selectedSourceID]
-        }
+        // Legacy single-source migration happens in AppSettings.decode only when the array is absent.
+        let initialSelectedSourceIDs = Set(settings.selectedSourceIDs)
         self.selectedSourceIDs = initialSelectedSourceIDs
+        self.selectedSourceID = settings.selectedSourceID.flatMap {
+            initialSelectedSourceIDs.contains($0) ? $0 : nil
+        } ?? initialSelectedSourceIDs.sorted().first
+        for source in settings.sourceSelectionDetails {
+            savedSourceDetails[source.id] = source
+        }
         self.sourceLanguageOverrides = settings.sourceLanguageOverrides.mapValues {
             LanguageCatalog.supportedSpeechInputLanguageID(for: $0)
         }
@@ -251,12 +258,23 @@ final class AppModel: ObservableObject {
     }
 
     var selectedSources: [InputSource] {
-        let selectedSourceIDs = self.selectedSourceIDs
-        guard selectedSourceIDs.isEmpty == false else {
-            return selectedSource.map { [$0] } ?? []
-        }
+        allSources.filter { selectedSourceIDs.contains($0.id) }
+    }
 
-        return allSources.filter { selectedSourceIDs.contains($0.id) }
+    var unavailableSelectedSources: [InputSource] {
+        let availableIDs = Set(allSources.map(\.id))
+        return selectedSourceIDs.subtracting(availableIDs).sorted().map { id in
+            savedSourceDetails[id] ?? InputSource(id: id,
+                name: String(id.split(separator: ":", maxSplits: 1).last ?? Substring(id)),
+                detail: String(id.dropFirst(4)), category: id.hasPrefix("app:") ? .application : .microphone)
+        }
+    }
+
+    /// Keep unavailable selections visible and removable without substituting another source.
+    var sourceSelectionOptions: [InputSource] { allSources + unavailableSelectedSources }
+
+    private var unavailableSourcesMessage: String {
+        localized(.selectedSourcesUnavailableFormat, unavailableSelectedSources.map(\.name).joined(separator: ", "))
     }
 
     var selectedSourceDisplayName: String {
@@ -518,24 +536,15 @@ final class AppModel: ObservableObject {
         }
 
         let availableSources = snapshot.applications + snapshot.microphones
-        let availableSourceIDs = Set(availableSources.map(\.id))
-        let retainedSelectedSourceIDs = selectedSourceIDs.intersection(availableSourceIDs)
-
-        if retainedSelectedSourceIDs != selectedSourceIDs {
-            selectedSourceIDs = retainedSelectedSourceIDs
-        }
-
-        if selectedSourceIDs.isEmpty, let defaultSourceID = preferredDefaultSourceID(in: snapshot) {
-            selectedSourceIDs = [defaultSourceID]
-        }
-
-        let primarySourceID = preferredPrimarySourceID(for: selectedSourceIDs)
-        if selectedSourceID != primarySourceID {
-            selectedSourceID = primarySourceID
+        // Discovery describes availability; only an explicit user choice can change selection.
+        for source in availableSources where selectedSourceIDs.contains(source.id) {
+            savedSourceDetails[source.id] = source
         }
 
         if sessionState == .running {
             setStatus(.running(sourceName: selectedSourceDisplayName))
+        } else if !unavailableSelectedSources.isEmpty {
+            setStatus(.custom(unavailableSourcesMessage))
         } else {
             setStatus(availableSources.isEmpty ? .noInputSourcesDetected : .ready)
         }
@@ -562,6 +571,11 @@ final class AppModel: ObservableObject {
             }
         }
         refreshSources()
+        guard unavailableSelectedSources.isEmpty else {
+            sessionState = .error
+            setStatus(.custom(unavailableSourcesMessage))
+            return
+        }
 
         let selectedSources = self.selectedSources
         guard selectedSources.isEmpty == false else {
@@ -604,7 +618,6 @@ final class AppModel: ObservableObject {
         var startedSessions: [LiveTranscriptionSession] = []
         var startedSources: [InputSource] = []
         var startErrors: [(source: InputSource, message: String)] = []
-        var attemptedMicrophoneFallback = false
 
         func startSource(_ source: InputSource) async {
             let sourceLanguageID = languageID(for: source)
@@ -671,14 +684,6 @@ final class AppModel: ObservableObject {
         }
 
         guard !Task.isCancelled, sessionLifecycle.accepts(sessionID) else { return }
-        if startedSessions.isEmpty,
-           selectedSources.allSatisfy({ $0.category == .application }),
-           let fallbackSource = microphoneSources.first {
-            attemptedMicrophoneFallback = true
-            await startSource(fallbackSource)
-        }
-
-        guard !Task.isCancelled, sessionLifecycle.accepts(sessionID) else { return }
         guard startedSessions.isEmpty == false else {
             for session in startedSessions {
                 session.stop()
@@ -692,9 +697,7 @@ final class AppModel: ObservableObject {
                 targetLanguageID: previousTranscriptOutputLanguageID
             )
             sessionState = .error
-            let localizedError = (
-                attemptedMicrophoneFallback ? startErrors.last?.message : startErrors.first?.message
-            ) ?? unableToStartText
+            let localizedError = startErrors.first?.message ?? unableToStartText
             setStatus(.custom(localizedError))
             overlayState = OverlayPreviewState(
                 translatedText: unableToStartText,
@@ -801,9 +804,13 @@ final class AppModel: ObservableObject {
             return
         }
 
+        for source in allSources where selectedSourceIDs.contains(source.id) {
+            savedSourceDetails[source.id] = source
+        }
         let settings = AppSettings(
             selectedSourceID: selectedSourceID,
             selectedSourceIDs: orderedSelectedSourceIDs(),
+            sourceSelectionDetails: sourceSelectionOptions.filter { selectedSourceIDs.contains($0.id) },
             sourceLanguageOverrides: sourceLanguageOverrides,
             sourceOutputLanguageOverrides: sourceOutputLanguageOverrides,
             inputLanguageID: inputLanguageID,
@@ -848,16 +855,13 @@ final class AppModel: ObservableObject {
         }
 
         return allSources.first(where: { selectedSourceIDs.contains($0.id) })?.id
+            ?? selectedSourceIDs.sorted().first
     }
 
     private func orderedSelectedSourceIDs() -> [String] {
         let orderedSourceIDs = allSources.map(\.id).filter { selectedSourceIDs.contains($0) }
         let remainingSourceIDs = selectedSourceIDs.subtracting(Set(orderedSourceIDs)).sorted()
         return orderedSourceIDs + remainingSourceIDs
-    }
-
-    private func preferredDefaultSourceID(in snapshot: SourceCatalogSnapshot) -> String? {
-        snapshot.microphones.first?.id ?? snapshot.applications.first?.id
     }
 
     func selectedResourcePreparationRequirements() -> (

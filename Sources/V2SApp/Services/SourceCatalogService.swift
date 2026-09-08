@@ -13,14 +13,21 @@ final class SourceCatalogService {
         "com.apple.finder"
     ]
 
-    private let microphoneDiscoverySession = AVCaptureDevice.DiscoverySession(
+    private lazy var microphoneDiscoverySession = AVCaptureDevice.DiscoverySession(
         deviceTypes: [.microphone, .external],
         mediaType: .audio,
         position: .unspecified
     )
 
+    private let snapshotProvider: (() -> SourceCatalogSnapshot)?
+
+    init(snapshotProvider: (() -> SourceCatalogSnapshot)? = nil) {
+        self.snapshotProvider = snapshotProvider
+    }
+
     func loadSnapshot() -> SourceCatalogSnapshot {
-        SourceCatalogSnapshot(
+        if let snapshotProvider { return snapshotProvider() }
+        return SourceCatalogSnapshot(
             applications: loadApplications(),
             microphones: loadMicrophones()
         )
