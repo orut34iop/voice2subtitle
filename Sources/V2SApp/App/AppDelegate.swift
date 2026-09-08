@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            terminateSingleInstanceLockOwnerIfNeeded()
+            // A held lock is authoritative. Never kill an owner merely for a slow UI reply.
             guard waitForSingleInstanceLock(timeout: 2.0) else {
                 NSApp.terminate(nil)
                 return
@@ -146,15 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         center.removeObserver(ackObserver)
 
-        if let acknowledgedPID {
-            let staleApplications = existingApplications.filter { $0.processIdentifier != acknowledgedPID }
-            terminateExistingApplications(staleApplications)
-            NSApp.terminate(nil)
-            return true
-        }
-
-        terminateExistingApplications(existingApplications)
-        return false
+        // A missing acknowledgement means busy or older, not safe to terminate.
+        // Leave the running instance and its in-memory transcript intact.
+        NSApp.terminate(nil)
+        return true
     }
 
     private func runningApplicationsForSingleInstance() -> [NSRunningApplication] {
@@ -251,61 +246,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = metadata.withCString { write(descriptor, $0, strlen($0)) }
     }
 
-    private func terminateSingleInstanceLockOwnerIfNeeded() {
-        guard let lockURL = singleInstanceLockURL(),
-              let metadata = singleInstanceLockMetadata(at: lockURL),
-              let pid = metadata.pid,
-              pid > 0,
-              pid != ProcessInfo.processInfo.processIdentifier,
-              let application = NSRunningApplication(processIdentifier: pid),
-              application.isTerminated == false,
-              matchesSingleInstanceIdentity(application, metadata: metadata) else {
-            return
-        }
-
-        terminateExistingApplications([application])
-    }
-
-    private func singleInstanceLockMetadata(at lockURL: URL) -> SingleInstanceLockMetadata? {
-        guard let contents = try? String(contentsOf: lockURL, encoding: .utf8) else {
-            return nil
-        }
-
-        var pid: Int32?
-        var identifier: String?
-        var path: String?
-
-        for line in contents.split(separator: "\n") {
-            if line.hasPrefix("pid=") {
-                pid = Int32(line.dropFirst(4))
-            } else if line.hasPrefix("identifier=") {
-                identifier = String(line.dropFirst("identifier=".count))
-            } else if line.hasPrefix("path=") {
-                path = String(line.dropFirst("path=".count))
-            }
-        }
-
-        return SingleInstanceLockMetadata(pid: pid, identifier: identifier, path: path)
-    }
-
-    private func matchesSingleInstanceIdentity(
-        _ application: NSRunningApplication,
-        metadata: SingleInstanceLockMetadata
-    ) -> Bool {
-        if let metadataIdentifier = metadata.identifier,
-           let bundleIdentifier = application.bundleIdentifier,
-           bundleIdentifier == metadataIdentifier {
-            return true
-        }
-
-        if let metadataPath = metadata.path,
-           application.bundleURL?.resolvingSymlinksInPath().path == metadataPath {
-            return true
-        }
-
-        return false
-    }
-
     private func installSingleInstanceWakeObserver() {
         guard singleInstanceWakeObserver == nil else {
             return
@@ -343,25 +283,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func terminateExistingApplications(_ applications: [NSRunningApplication]) {
-        guard applications.isEmpty == false else {
-            return
-        }
-
-        for application in applications where application.isTerminated == false {
-            application.terminate()
-        }
-
-        let deadline = Date().addingTimeInterval(1.2)
-        while applications.contains(where: { $0.isTerminated == false }) && Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
-        }
-
-        for application in applications where application.isTerminated == false {
-            application.forceTerminate()
-        }
-    }
-
     // MARK: - Source refresh timer
 
     private func installSourceRefreshTimer(interval: TimeInterval) {
@@ -393,13 +314,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sourceRefreshTimer = nil
         cancellables.removeAll()
         appModel.persistSettings()
+        appModel.flushSettings()
     }
-}
-
-private struct SingleInstanceLockMetadata {
-    let pid: Int32?
-    let identifier: String?
-    let path: String?
 }
 
 private extension AppDelegate {

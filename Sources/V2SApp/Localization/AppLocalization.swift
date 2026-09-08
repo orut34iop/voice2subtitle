@@ -6,6 +6,7 @@ protocol AppLocalizableError {
 }
 
 enum AppTextKey: String {
+    case summaryThroughFormat
     case start
     case stop
     case wait
@@ -335,6 +336,7 @@ enum AppLocalization {
 
     private static let tables: [String: [String: String]] = [
         "en": [
+            "summaryThroughFormat": "Summary through %@",
             "start": "Start",
             "stop": "Stop",
             "wait": "Wait",
@@ -544,6 +546,7 @@ enum AppLocalization {
             "checkForUpdates": "Check for Updates",
         ],
         "zh-Hans": [
+            "summaryThroughFormat": "摘要截至 %@ 的记录",
             "start": "开始",
             "stop": "停止",
             "wait": "等待",

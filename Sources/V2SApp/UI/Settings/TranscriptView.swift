@@ -49,6 +49,13 @@ final class TranscriptWindowController: NSWindowController, NSWindowDelegate {
 
 struct TranscriptView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var transcriptStore: TranscriptStore
+    @State private var summaryDates: [TranscriptTab: Date] = [:]
+
+    init(model: AppModel) {
+        self.model = model
+        self.transcriptStore = model.transcriptStore
+    }
     @State private var selectedTab: TranscriptTab = .origin
     @State private var isSummarizeEnabled = false
     @State private var summarizedText: [TranscriptTab: String] = [:]
@@ -86,6 +93,7 @@ struct TranscriptView: View {
             cancelSummarization()
             isSummarizeEnabled = false
             summarizedText = [:]
+            summaryDates = [:]
             summarizeError = nil
         }
         .onDisappear {
@@ -109,26 +117,29 @@ struct TranscriptView: View {
 
     @ViewBuilder
     private func transcriptTab(tab: TranscriptTab) -> some View {
-        let rawText = fullText(for: tab)
-        let displayText: String = {
-            if isSummarizeEnabled, let summary = summarizedText[tab] {
-                return summary
-            }
-            return rawText
-        }()
-
         ScrollView {
-            if displayText.isEmpty {
-                Text("–")
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(20)
+            if isSummarizeEnabled, let summary = summarizedText[tab] {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let date = summaryDates[tab] {
+                        Text(model.localized(.summaryThroughFormat,
+                            date.formatted(date: .omitted, time: .shortened)))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(summary).textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
             } else {
-                Text(displayText)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if transcriptStore.entries.isEmpty {
+                        Text("–").foregroundStyle(.tertiary)
+                    }
+                    ForEach(transcriptStore.entries) { entry in
+                        TranscriptRow(entry: entry, isTranslation: tab == .translation).equatable()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
             }
         }
     }
@@ -226,6 +237,7 @@ struct TranscriptView: View {
     private func startSummarization(for tab: TranscriptTab) {
         cancelSummarization()
         let text = fullText(for: tab)
+        let snapshotDate = transcriptStore.entries.last?.capturedAt ?? Date()
         let languageID = summaryLanguageID(for: tab)
         guard !text.isEmpty else {
             isSummarizeEnabled = false
@@ -243,14 +255,12 @@ struct TranscriptView: View {
         isSummarizing = true
         summarizeTask = Task {
             do {
-                let result = try await Self.runFoundationModelSummarization(
-                    text: text,
-                    languageID: languageID
-                )
+                let result = try await TranscriptSummarizer.summarizeOnDevice(text, languageID: languageID)
                 await MainActor.run {
                     guard Task.isCancelled == false,
                           summarizeGeneration == generation else { return }
                     summarizedText[tab] = result
+                    summaryDates[tab] = snapshotDate
                     isSummarizing = false
                     summarizeTask = nil
                 }
@@ -271,35 +281,22 @@ struct TranscriptView: View {
 #endif
     }
 
-#if canImport(FoundationModels)
-    @available(macOS 26.0, *)
-    private static func runFoundationModelSummarization(
-        text: String,
-        languageID: String
-    ) async throws -> String {
-        let session = LanguageModelSession()
-        let prompt = summarizationPrompt(text: text, languageID: languageID)
-        let response = try await session.respond(to: prompt)
-        return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+}
 
-    @available(macOS 26.0, *)
-    private static func summarizationPrompt(text: String, languageID: String) -> String {
-        let languageName = summaryLanguageName(for: languageID)
-        return """
-        Provide a concise summary of the following transcript.
-        The summary must be written in \(languageName) (\(languageID)).
-        Preserve the key points and do not translate the summary into any other language.
+private struct TranscriptRow: View, Equatable {
+    let entry: TranscriptEntry
+    let isTranslation: Bool
 
-        Transcript:
-        \(text)
-        """
+    var body: some View {
+        let text = isTranslation ? entry.translatedText : entry.sourceText
+        if !text.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                if !entry.sourceName.isEmpty {
+                    Text(entry.sourceName).font(.caption).foregroundStyle(.secondary)
+                }
+                Text(text).font(.body).textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
-
-    @available(macOS 26.0, *)
-    private static func summaryLanguageName(for languageID: String) -> String {
-        Locale(identifier: "en").localizedString(forIdentifier: languageID)
-            ?? LanguageCatalog.displayName(for: languageID)
-    }
-#endif
 }

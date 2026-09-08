@@ -108,6 +108,7 @@ final class TranslationCoordinator: ObservableObject {
     private var currentPair: LanguagePair?
     private var pendingOperations: [PendingOperation] = []
     private var activeRunnerID: UUID?
+    private var cancelActiveBackend: (() -> Void)?
     private var activeOperation: PendingOperation?
     private var activeOperationID: UUID? { activeOperation?.id }
     private var generation: Int = 0
@@ -206,14 +207,16 @@ final class TranslationCoordinator: ObservableObject {
             source: session.sourceLanguage?.minimalIdentifier,
             target: session.targetLanguage?.minimalIdentifier,
             prepare: { try await session.prepareTranslation() },
-            translate: { try await session.translate($0).targetText }
+            translate: { try await session.translate($0).targetText },
+            cancelBackend: { if #available(macOS 26.0, *) { session.cancel() } }
         )
     }
 
     func run(
         source: String?, target: String?,
         prepare: () async throws -> Void,
-        translate: (String) async throws -> String
+        translate: (String) async throws -> String,
+        cancelBackend: @escaping () -> Void = {}
     ) async {
         let runnerID = UUID()
 
@@ -251,7 +254,8 @@ final class TranslationCoordinator: ObservableObject {
         }
 
         guard let anchoredPair = currentPair,
-              source == anchoredPair.source, target == anchoredPair.target else {
+              source.map({ Locale.Language(identifier: $0).maximalIdentifier }) == Locale.Language(identifier: anchoredPair.source).maximalIdentifier,
+              target.map({ Locale.Language(identifier: $0).maximalIdentifier }) == Locale.Language(identifier: anchoredPair.target).maximalIdentifier else {
             return
         }
 
@@ -270,6 +274,7 @@ final class TranslationCoordinator: ObservableObject {
 
             guard activeRunnerID == runnerID else { return }
             activeOperation = operation
+            cancelActiveBackend = cancelBackend
 
             switch operation {
             case .prepare(let id, _, _, let continuation):
@@ -370,7 +375,10 @@ final class TranslationCoordinator: ObservableObject {
 
         if let operation = activeOperation, operation.id == id {
             cancel(operation)
+            let cancelBackend = cancelActiveBackend
+            cancelActiveBackend = nil
             activeOperation = nil
+            cancelBackend?()
             // Detach the logical waiter immediately, even if the framework is unresponsive.
             activeRunnerID = nil
             signalRunnerAvailabilityWaiters()
@@ -381,6 +389,9 @@ final class TranslationCoordinator: ObservableObject {
 
     private func cancelOutstandingOperations() {
         if let activeOperation { cancel(activeOperation) }
+        let cancelBackend = cancelActiveBackend
+        cancelActiveBackend = nil
+        cancelBackend?()
         for operation in pendingOperations { cancel(operation) }
         pendingOperations.removeAll()
         activeRunnerID = nil
@@ -531,7 +542,10 @@ final class TranslationCoordinator: ObservableObject {
         continuation: OperationCompletion<Void>,
         error: Error? = nil
     ) {
-        if activeOperationID == id { activeOperation = nil }
+        if activeOperationID == id {
+            activeOperation = nil
+            cancelActiveBackend = nil
+        }
 
         if let error {
             continuation.resume(throwing: error)
@@ -546,7 +560,10 @@ final class TranslationCoordinator: ObservableObject {
         result: String? = nil,
         error: Error? = nil
     ) {
-        if activeOperationID == id { activeOperation = nil }
+        if activeOperationID == id {
+            activeOperation = nil
+            cancelActiveBackend = nil
+        }
 
         if let error {
             continuation.resume(throwing: error)
