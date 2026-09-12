@@ -281,7 +281,14 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
         try await requestRequiredPermissions(for: source)
         try checkActive()
-        if try await configureModernSpeechRecognizer(localeIdentifier: localeIdentifier) == false {
+        if #available(macOS 26.0, *), SpeechTranscriber.isAvailable {
+            guard try await configureModernSpeechRecognizer(localeIdentifier: localeIdentifier) else {
+                throw SessionError.unavailableSpeechRecognizer(localeIdentifier)
+            }
+        } else {
+            // The legacy API asks for permission to use Apple's speech servers.
+            // Keep this path only for systems without the on-device SpeechAnalyzer.
+            try await requestLegacySpeechRecognitionPermission()
             try await runOnCaptureQueue {
                 try self.configureSpeechRecognizer(localeIdentifier: localeIdentifier)
             }
@@ -354,24 +361,6 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
     }
 
     private func requestRequiredPermissions(for source: InputSource) async throws {
-        try requirePrivacyUsageDescription("NSSpeechRecognitionUsageDescription")
-
-        let speechStatus = SFSpeechRecognizer.authorizationStatus()
-
-        switch speechStatus {
-        case .authorized:
-            break
-        case .notDetermined:
-            let granted = await requestSpeechAuthorization()
-            guard granted else {
-                throw SessionError.speechPermissionDenied
-            }
-        case .denied, .restricted:
-            throw SessionError.speechPermissionDenied
-        @unknown default:
-            throw SessionError.speechPermissionDenied
-        }
-
         switch source.category {
         case .microphone:
             try requirePrivacyUsageDescription("NSMicrophoneUsageDescription")
@@ -396,6 +385,26 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         }
     }
 
+    private func requestLegacySpeechRecognitionPermission() async throws {
+        try requirePrivacyUsageDescription("NSSpeechRecognitionUsageDescription")
+
+        let speechStatus = SFSpeechRecognizer.authorizationStatus()
+
+        switch speechStatus {
+        case .authorized:
+            break
+        case .notDetermined:
+            let granted = await requestSpeechAuthorization()
+            guard granted else {
+                throw SessionError.speechPermissionDenied
+            }
+        case .denied, .restricted:
+            throw SessionError.speechPermissionDenied
+        @unknown default:
+            throw SessionError.speechPermissionDenied
+        }
+    }
+
     private func requirePrivacyUsageDescription(_ key: String) throws {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
               value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
@@ -411,6 +420,10 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         }
 
         guard recognizer.isAvailable else {
+            throw SessionError.unavailableSpeechRecognizer(localeIdentifier)
+        }
+
+        guard recognizer.supportsOnDeviceRecognition else {
             throw SessionError.unavailableSpeechRecognizer(localeIdentifier)
         }
 
@@ -621,6 +634,10 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     private func makeRecognitionRequest() -> SFSpeechAudioBufferRecognitionRequest {
         let request = SFSpeechAudioBufferRecognitionRequest()
+        // Never allow the compatibility recognizer to send captured audio over
+        // the network. Apple only honors this when the recognizer supports it;
+        // configureSpeechRecognizer checks that capability before creating it.
+        request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
         request.addsPunctuation = true
