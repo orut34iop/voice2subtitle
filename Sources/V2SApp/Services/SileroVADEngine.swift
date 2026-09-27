@@ -26,8 +26,9 @@ final class SileroVADEngine {
 
     /// Silero VAD v5 expects 512-sample chunks at 16 kHz.
     private static let chunkSize = 512
-    /// LSTM state size: shape [2, 1, 64] = 128 floats.
-    private static let stateSize = 2 * 1 * 64
+    /// The bundled model uses a combined recurrent state [2, 1, 128].
+    private static let stateSize = 2 * 1 * 128
+    private static let contextSize = 64
 
     // MARK: - ONNX Runtime objects
 
@@ -36,10 +37,9 @@ final class SileroVADEngine {
 
     // MARK: - Model state
 
-    /// LSTM hidden state, carried across chunks.
-    private var hState: [Float]
-    /// LSTM cell state, carried across chunks.
-    private var cState: [Float]
+    private var state: [Float]
+    /// The model expects 64 preceding samples before each 512-sample window.
+    private var context: [Float]
     /// Sample-rate tensor (constant, reusable).
     private let srTensor: ORTValue
     /// Backing data for srTensor (must stay alive).
@@ -57,7 +57,6 @@ final class SileroVADEngine {
         minSpeechFrames: 3,
         minSilenceFrames: 8
     )
-    private var hasLoggedInferenceFailure = false
 
     var isSpeaking: Bool { hysteresis.isSpeaking }
 
@@ -74,13 +73,17 @@ final class SileroVADEngine {
 
         session = try ORTSession(env: env, modelPath: modelURL.path, sessionOptions: sessionOptions)
 
-        hState = [Float](repeating: 0, count: Self.stateSize)
-        cState = [Float](repeating: 0, count: Self.stateSize)
+        state = [Float](repeating: 0, count: Self.stateSize)
+        context = [Float](repeating: 0, count: Self.contextSize)
 
         // Pre-build the sample-rate tensor (constant Int64 = 16000).
         var sr: Int64 = 16000
         srData = NSMutableData(bytes: &sr, length: MemoryLayout<Int64>.size)
-        srTensor = try ORTValue(tensorData: srData, elementType: .int64, shape: [1])
+        srTensor = try ORTValue(tensorData: srData, elementType: .int64, shape: [])
+
+        // Loading an ONNX file alone does not validate its inference contract.
+        _ = try infer(chunk: [Float](repeating: 0, count: Self.chunkSize))
+        reset()
     }
 
     // MARK: - Public API
@@ -88,9 +91,9 @@ final class SileroVADEngine {
     /// Process an audio buffer and return the VAD result.
     ///
     /// Accumulates samples, runs inference on complete 512-sample chunks, and applies
-    /// hysteresis. Returns the result from the *last* chunk processed (or a no-speech
-    /// result if no full chunk was available).
-    func process(buffer: AVAudioPCMBuffer) -> VADResult {
+    /// hysteresis. Preserves the speech state when no complete chunk is available.
+    /// Inference errors propagate so callers can fall back instead of treating failure as silence.
+    func process(buffer: AVAudioPCMBuffer) throws -> VADResult {
         guard let channelData = buffer.floatChannelData, buffer.frameLength > 0 else {
             return VADResult(speechProbability: 0, isSpeech: isSpeaking,
                              containsSpeechOnset: false, containsSpeechOffset: false)
@@ -108,17 +111,7 @@ final class SileroVADEngine {
             let chunk = Array(accumulationBuffer.prefix(Self.chunkSize))
             accumulationBuffer.removeFirst(Self.chunkSize)
 
-            let probability: Float
-            do {
-                probability = try infer(chunk: chunk)
-                hasLoggedInferenceFailure = false
-            } catch {
-                if !hasLoggedInferenceFailure {
-                    fputs("Silero VAD inference failed: \(error)\n", stderr)
-                    hasLoggedInferenceFailure = true
-                }
-                probability = 0
-            }
+            let probability = try infer(chunk: chunk)
             if probability > maxProbability { maxProbability = probability }
 
             let transition = hysteresis.apply(probability: probability)
@@ -136,11 +129,10 @@ final class SileroVADEngine {
 
     /// Reset LSTM state and hysteresis. Call when starting a new recognition session.
     func reset() {
-        hState = [Float](repeating: 0, count: Self.stateSize)
-        cState = [Float](repeating: 0, count: Self.stateSize)
+        state = [Float](repeating: 0, count: Self.stateSize)
+        context = [Float](repeating: 0, count: Self.contextSize)
         accumulationBuffer.removeAll()
         hysteresis.reset()
-        hasLoggedInferenceFailure = false
     }
 
     // MARK: - Private
@@ -154,8 +146,8 @@ final class SileroVADEngine {
     }
 
     private func infer(chunk: [Float]) throws -> Float {
-        // Build input tensor: [1, 512]
-        var audioSamples = chunk
+        // Match the bundled state/stateN model contract (576 input samples at 16 kHz).
+        var audioSamples = context + chunk
         let audioData = NSMutableData(
             bytes: &audioSamples,
             length: audioSamples.count * MemoryLayout<Float>.size
@@ -163,59 +155,40 @@ final class SileroVADEngine {
         let audioTensor = try ORTValue(
             tensorData: audioData,
             elementType: .float,
-            shape: [1, NSNumber(value: Self.chunkSize)]
+            shape: [1, NSNumber(value: audioSamples.count)]
         )
-
-        // Build h tensor: [2, 1, 64]
-        let hData = NSMutableData(
-            bytes: &hState,
-            length: hState.count * MemoryLayout<Float>.size
+        let stateData = NSMutableData(
+            bytes: &state,
+            length: state.count * MemoryLayout<Float>.size
         )
-        let hTensor = try ORTValue(
-            tensorData: hData,
+        let stateTensor = try ORTValue(
+            tensorData: stateData,
             elementType: .float,
-            shape: [2, 1, 64]
+            shape: [2, 1, 128]
         )
-
-        // Build c tensor: [2, 1, 64]
-        let cData = NSMutableData(
-            bytes: &cState,
-            length: cState.count * MemoryLayout<Float>.size
-        )
-        let cTensor = try ORTValue(
-            tensorData: cData,
-            elementType: .float,
-            shape: [2, 1, 64]
-        )
-
-        let runOptions = try ORTRunOptions()
         let outputs = try session.run(
-            withInputs: [
-                "input": audioTensor,
-                "sr": srTensor,
-                "h": hTensor,
-                "c": cTensor,
-            ],
-            outputNames: Set(["output", "hn", "cn"]),
-            runOptions: runOptions
+            withInputs: ["input": audioTensor, "sr": srTensor, "state": stateTensor],
+            outputNames: Set(["output", "stateN"]),
+            runOptions: try ORTRunOptions()
         )
-
-        // Read speech probability
         guard let outputValue = outputs["output"] else {
             throw SileroVADError.missingOutput("output")
         }
+        guard let nextState = outputs["stateN"] else {
+            throw SileroVADError.missingOutput("stateN")
+        }
         let outputData = try outputValue.tensorData() as Data
-        let probability = outputData.withUnsafeBytes { $0.load(as: Float.self) }
-
-        // Update LSTM states for next call
-        if let hnValue = outputs["hn"] {
-            let hnData = try hnValue.tensorData() as Data
-            hState = hnData.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        let nextStateData = try nextState.tensorData() as Data
+        guard outputData.count == MemoryLayout<Float>.size,
+              nextStateData.count == Self.stateSize * MemoryLayout<Float>.size else {
+            throw SileroVADError.invalidOutput
         }
-        if let cnValue = outputs["cn"] {
-            let cnData = try cnValue.tensorData() as Data
-            cState = cnData.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        let probability = outputData.withUnsafeBytes { $0.loadUnaligned(as: Float.self) }
+        guard probability.isFinite, (0...1).contains(probability) else {
+            throw SileroVADError.invalidOutput
         }
+        state = nextStateData.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        context = Array(chunk.suffix(Self.contextSize))
 
         return probability
     }
@@ -226,11 +199,14 @@ final class SileroVADEngine {
 enum SileroVADError: LocalizedError {
     case modelNotFound
     case missingOutput(String)
+    case invalidOutput
 
     var errorDescription: String? {
         switch self {
         case .modelNotFound:
             return "Silero VAD model (silero_vad.onnx) not found in app bundle."
+        case .invalidOutput:
+            return "Silero VAD inference returned an invalid probability or recurrent state."
         case .missingOutput(let name):
             return "Silero VAD inference missing expected output: \(name)"
         }

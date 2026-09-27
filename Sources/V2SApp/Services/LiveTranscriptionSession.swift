@@ -33,7 +33,7 @@ private final class SessionVADEngine {
         throw SessionVADError.unavailable
     }
 
-    func process(buffer: AVAudioPCMBuffer) -> SessionVADResult {
+    func process(buffer: AVAudioPCMBuffer) throws -> SessionVADResult {
         _ = buffer
         return SessionVADResult(
             speechProbability: 0,
@@ -451,16 +451,9 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         do {
             vadEngine = try SessionVADEngine()
         } catch {
-            // VAD is optional — fall back to implicit ASR-based silence detection.
+            // VAD is optional; keep recognition running so its progress can be the fallback.
             vadEngine = nil
-            Task {
-                await emitError(
-                    localized(
-                        .sileroVadUnavailableFallbackFormat,
-                        localizedErrorDescription(error)
-                    )
-                )
-            }
+            fputs("Silero VAD unavailable; using recognition progress: \(error)\n", stderr)
         }
     }
 
@@ -886,17 +879,25 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         boostIfQuiet(buffer: processingBuffer, levels: audioLevels)
 
         if let vadEngine {
-            let vadResult = vadEngine.process(buffer: processingBuffer)
-            lastVADProbability = vadResult.speechProbability
-            if vadResult.isSpeech || vadResult.containsSpeechOnset {
-                reportSpeechActivity()
-            }
-
-            if vadResult.containsSpeechOffset {
-                scheduleVADSilenceCommit()
-            }
-            if vadResult.containsSpeechOnset {
+            do {
+                let vadResult = try vadEngine.process(buffer: processingBuffer)
+                lastVADProbability = vadResult.speechProbability
+                if vadResult.isSpeech || vadResult.containsSpeechOnset {
+                    reportSpeechActivity()
+                }
+                if vadResult.containsSpeechOffset {
+                    scheduleVADSilenceCommit()
+                }
+                if vadResult.containsSpeechOnset {
+                    cancelVADSilenceTimer()
+                }
+            } catch {
+                // A loaded model can still fail during inference. Enable the same
+                // recognition-progress fallback used when the model cannot load.
+                self.vadEngine = nil
+                lastVADProbability = 0
                 cancelVADSilenceTimer()
+                fputs("Silero VAD disabled after inference failure: \(error)\n", stderr)
             }
         }
 

@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import v2s
 
@@ -150,3 +151,38 @@ final class SubtitleAutoHideTests: XCTestCase {
         XCTAssertTrue(model.shouldShowOverlay)
     }
 }
+
+
+#if canImport(OnnxRuntimeBindings)
+final class SileroAudioRegressionTests: XCTestCase {
+    func testBundledModelDetectsEnglishSpeechAndReturnsToSilence() throws {
+        let audioURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Fixtures/english-speech.wav")
+        let file = try AVAudioFile(forReading: audioURL)
+        let audio = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+        try file.read(into: audio)
+        XCTAssertEqual(audio.format.sampleRate, 16_000)
+        let engine = try SileroVADEngine()
+        let chunk = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: audio.format, frameCapacity: 512))
+        chunk.frameLength = 512
+        let samples = try XCTUnwrap(audio.floatChannelData)[0]
+        let destination = try XCTUnwrap(chunk.floatChannelData)[0]
+        var maximum: Float = 0
+        var speechFrames = 0
+        for offset in stride(from: 0, through: Int(audio.frameLength) - 512, by: 512) {
+            destination.update(from: samples.advanced(by: offset), count: 512)
+            let result = try engine.process(buffer: chunk)
+            maximum = max(maximum, result.speechProbability)
+            if result.isSpeech { speechFrames += 1 }
+        }
+        XCTAssertGreaterThan(maximum, 0.8, "Bundled model must actually infer, not silently return zero on an incompatible contract")
+        XCTAssertGreaterThan(speechFrames, 30)
+        destination.update(repeating: 0, count: 512)
+        var silent = try engine.process(buffer: chunk)
+        for _ in 0..<100 { silent = try engine.process(buffer: chunk) }
+        XCTAssertFalse(silent.isSpeech)
+        engine.reset()
+        XCTAssertFalse(try engine.process(buffer: chunk).isSpeech)
+    }
+}
+#endif
