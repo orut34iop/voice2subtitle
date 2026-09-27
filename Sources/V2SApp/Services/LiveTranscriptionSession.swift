@@ -173,6 +173,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     @MainActor private var transcriptHandler: (@MainActor (RecognizedSentence) -> Void)?
     @MainActor private var partialHandler: (@MainActor (DraftSegment?) -> Void)?
+    @MainActor private var speechActivityHandler: (@MainActor (ContinuousClock.Instant) -> Void)?
     @MainActor private var errorHandler: (@MainActor (String) -> Void)?
     @MainActor private var recentCommittedSentenceHistory: [RecentCommittedSentence] = []
 
@@ -237,6 +238,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         contextualStrings: [String] = [],
         transcriptHandler: @escaping @MainActor (RecognizedSentence) -> Void,
         partialHandler: @escaping @MainActor (DraftSegment?) -> Void,
+        speechActivityHandler: @escaping @MainActor (ContinuousClock.Instant) -> Void,
         errorHandler: @escaping @MainActor (String) -> Void
     ) async throws {
         try await withTaskCancellationHandler {
@@ -244,7 +246,8 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
                 source: source, localeIdentifier: localeIdentifier,
                 interfaceLanguageID: interfaceLanguageID, modeConfig: modeConfig,
                 contextualStrings: contextualStrings, transcriptHandler: transcriptHandler,
-                partialHandler: partialHandler, errorHandler: errorHandler
+                partialHandler: partialHandler, speechActivityHandler: speechActivityHandler,
+                errorHandler: errorHandler
             )
         } onCancel: {
             self.stop()
@@ -263,12 +266,14 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         contextualStrings: [String] = [],
         transcriptHandler: @escaping @MainActor (RecognizedSentence) -> Void,
         partialHandler: @escaping @MainActor (DraftSegment?) -> Void,
+        speechActivityHandler: @escaping @MainActor (ContinuousClock.Instant) -> Void,
         errorHandler: @escaping @MainActor (String) -> Void
     ) async throws {
         try checkActive()
         await MainActor.run {
             self.transcriptHandler = transcriptHandler
             self.partialHandler = partialHandler
+            self.speechActivityHandler = speechActivityHandler
             self.errorHandler = errorHandler
             recentCommittedSentenceHistory.removeAll()
         }
@@ -355,6 +360,7 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         Task { @MainActor [weak self] in
             self?.transcriptHandler = nil
             self?.partialHandler = nil
+            self?.speechActivityHandler = nil
             self?.errorHandler = nil
             self?.recentCommittedSentenceHistory.removeAll()
         }
@@ -882,6 +888,9 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         if let vadEngine {
             let vadResult = vadEngine.process(buffer: processingBuffer)
             lastVADProbability = vadResult.speechProbability
+            if vadResult.isSpeech || vadResult.containsSpeechOnset {
+                reportSpeechActivity()
+            }
 
             if vadResult.containsSpeechOffset {
                 scheduleVADSilenceCommit()
@@ -907,6 +916,14 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
         // Always forward audio to the recognizer — VAD is used only
         // for silence-commit timing, not to gate the audio stream.
         recognitionRequest.append(recognizerBuffer)
+    }
+
+    private func reportSpeechActivity() {
+        let instant = ContinuousClock.now
+        Task { @MainActor [weak self] in
+            guard let self, !self.cancellation.isCancelled else { return }
+            self.speechActivityHandler?(instant)
+        }
     }
 
     private func appendToSpeechAnalyzer(_ processingBuffer: AVAudioPCMBuffer) {
@@ -1877,6 +1894,8 @@ final class LiveTranscriptionSession: NSObject, @unchecked Sendable {
 
     private func observeDraftText(_ text: String, at now: Date) {
         if text != lastDraftText {
+            // Recognition progress is a fallback only when the VAD could not load.
+            if vadEngine == nil && !text.isEmpty { reportSpeechActivity() }
             lastDraftText = text
             lastDraftTextChangeTime = now
             draftChangeHistory.append((text: text, time: now))

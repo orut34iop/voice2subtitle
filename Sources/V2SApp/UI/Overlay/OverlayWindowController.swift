@@ -259,7 +259,16 @@ final class OverlayWindowController {
                 // Capture snapshot synchronously (before SwiftUI re-renders)
                 // @Published fires on willSet, so current view content is still intact
                 self.captureHideSnapshotIfNeeded(
-                    newVisible: newVisible, newState: self.model.overlayState)
+                    newVisible: newVisible && !self.model.isOverlayHiddenForSilence, newState: self.model.overlayState)
+                self.scheduleWindowSync()
+            }
+            .store(in: &cancellables)
+
+        model.$isOverlayHiddenForSilence
+            .sink { [weak self] hidden in
+                guard let self else { return }
+                self.captureHideSnapshotIfNeeded(
+                    newVisible: self.model.isOverlayVisible && !hidden, newState: self.model.overlayState)
                 self.scheduleWindowSync()
             }
             .store(in: &cancellables)
@@ -268,7 +277,7 @@ final class OverlayWindowController {
             .sink { [weak self] newState in
                 guard let self else { return }
                 self.captureHideSnapshotIfNeeded(
-                    newVisible: self.model.isOverlayVisible, newState: newState)
+                    newVisible: self.model.isOverlayVisible && !self.model.isOverlayHiddenForSilence, newState: newState)
                 self.scheduleWindowSync()
             }
             .store(in: &cancellables)
@@ -337,7 +346,7 @@ final class OverlayWindowController {
     }
 
     private func syncWindow() {
-        let shouldShow = model.isOverlayVisible && model.overlayState != nil
+        let shouldShow = model.shouldShowOverlay
 
         if shouldShow && !panelsShown {
             // Transition: hidden → visible
@@ -988,7 +997,7 @@ final class OverlayWindowController {
     }
 
     private func updatePassThroughBubble() {
-        guard model.isOverlayVisible,
+        guard model.shouldShowOverlay,
               model.overlayState != nil else {
             interactionState.updateScrollbarRevealProgress(0.0)
             interactionState.updateIsOverlayHovered(false)
@@ -1070,7 +1079,7 @@ final class OverlayWindowController {
     }
 
     private func desiredMouseTrackingMode(for mouseLocation: NSPoint) -> MouseTrackingMode {
-        guard model.isOverlayVisible,
+        guard model.shouldShowOverlay,
               model.overlayState != nil,
               panelsShown else {
             return .idle

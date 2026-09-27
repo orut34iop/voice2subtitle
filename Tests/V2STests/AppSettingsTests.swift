@@ -34,6 +34,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(settings.sourceLanguageOverrides.isEmpty)
         XCTAssertTrue(settings.sourceOutputLanguageOverrides.isEmpty)
         XCTAssertTrue(settings.releasedSpeechResourceIDs.isEmpty)
+        XCTAssertTrue(settings.autoHideSubtitles)
     }
 
     func testMultiSourceSettingsRoundTripPreservesOverrides() throws {
@@ -48,6 +49,7 @@ final class AppSettingsTests: XCTestCase {
             overlayStyle: .default,
             subtitleMode: .balanced,
             subtitleDisplayMode: .both,
+            autoHideSubtitles: false,
             glossary: ["CEO": "Chief Executive Officer"],
             releasedSpeechResourceIDs: ["speech:ja", "speech:en"]
         )
@@ -62,6 +64,7 @@ final class AppSettingsTests: XCTestCase {
             decoded.sourceOutputLanguageOverrides,
             ["mic-1": "zh-Hans", "app-1": "de"]
         )
+        XCTAssertFalse(decoded.autoHideSubtitles)
         XCTAssertEqual(decoded.inputLanguageID, "en")
         XCTAssertEqual(decoded.outputLanguageID, "ja")
         XCTAssertEqual(decoded.interfaceLanguageID, "en")

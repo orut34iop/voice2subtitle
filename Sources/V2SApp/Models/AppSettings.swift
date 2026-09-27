@@ -12,6 +12,7 @@ struct AppSettings: Codable {
     var overlayStyle: OverlayStyle
     var subtitleMode: SubtitleMode
     var subtitleDisplayMode: SubtitleDisplayMode
+    var autoHideSubtitles: Bool
     var glossary: [String: String]
     var releasedSpeechResourceIDs: [String]
 
@@ -53,6 +54,8 @@ struct AppSettings: Codable {
             ?? AppSettings.default.subtitleMode
         subtitleDisplayMode = (try? c.decodeIfPresent(SubtitleDisplayMode.self, forKey: .subtitleDisplayMode))
             ?? AppSettings.default.subtitleDisplayMode
+        autoHideSubtitles = (try? c.decode(Bool.self, forKey: .autoHideSubtitles))
+            ?? AppSettings.default.autoHideSubtitles
         glossary = (try? c.decodeIfPresent([String: String].self, forKey: .glossary))
             ?? AppSettings.default.glossary
         releasedSpeechResourceIDs = (try? c.decodeIfPresent([String].self, forKey: .releasedSpeechResourceIDs))
@@ -71,6 +74,7 @@ struct AppSettings: Codable {
         overlayStyle: OverlayStyle,
         subtitleMode: SubtitleMode,
         subtitleDisplayMode: SubtitleDisplayMode,
+        autoHideSubtitles: Bool = true,
         glossary: [String: String],
         releasedSpeechResourceIDs: [String] = []
     ) {
@@ -85,6 +89,7 @@ struct AppSettings: Codable {
         self.overlayStyle     = overlayStyle
         self.subtitleMode     = subtitleMode
         self.subtitleDisplayMode = subtitleDisplayMode
+        self.autoHideSubtitles = autoHideSubtitles
         self.glossary         = glossary
         self.releasedSpeechResourceIDs = releasedSpeechResourceIDs
     }

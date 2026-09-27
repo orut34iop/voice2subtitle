@@ -245,6 +245,13 @@ struct SettingsView: View {
                     Text(model.localized(.onlyThreeControlsAcceptClicks))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    settingsRow(model.localized(.autoHideSubtitles)) {
+                        Toggle(model.localized(.autoHideSubtitles), isOn: $model.autoHideSubtitles)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .help(model.localized(.autoHideSubtitlesHelp))
+                    }
+                    Divider()
                     settingsRow(model.localized(.textOutline)) {
                         Toggle("", isOn: textOutlineEnabledBinding)
                             .toggleStyle(.switch)

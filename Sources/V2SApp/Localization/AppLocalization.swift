@@ -91,6 +91,8 @@ enum AppTextKey: String {
     case targetTerm
     case subtitleOverlay
     case onlyThreeControlsAcceptClicks
+    case autoHideSubtitles
+    case autoHideSubtitlesHelp
     case textOutline
     case outlineColor
     case attachToSource
@@ -425,6 +427,8 @@ enum AppLocalization {
             "targetTerm": "Target term",
             "subtitleOverlay": "Subtitle Overlay",
             "onlyThreeControlsAcceptClicks": "Only the 3 controls accept clicks",
+            "autoHideSubtitles": "Auto-hide subtitles",
+            "autoHideSubtitlesHelp": "Hide subtitles after 3 seconds without speech; show them again when speech resumes.",
             "textOutline": "Text Outline",
             "outlineColor": "Outline Color",
             "attachToSource": "Attach to Source",
@@ -637,6 +641,8 @@ enum AppLocalization {
             "targetTerm": "目标词",
             "subtitleOverlay": "字幕浮层",
             "onlyThreeControlsAcceptClicks": "只有这 3 个控件可点击",
+            "autoHideSubtitles": "自动隐藏字幕",
+            "autoHideSubtitlesHelp": "连续 3 秒未检测到语音时隐藏字幕，语音恢复后自动显示。",
             "textOutline": "文字描边",
             "outlineColor": "描边颜色",
             "attachToSource": "附着到源应用",
@@ -840,6 +846,8 @@ enum AppLocalization {
             "targetTerm": "Término de destino",
             "subtitleOverlay": "Superposición de subtítulos",
             "onlyThreeControlsAcceptClicks": "Solo los 3 controles aceptan clics",
+            "autoHideSubtitles": "Ocultar subtítulos automáticamente",
+            "autoHideSubtitlesHelp": "Oculta los subtítulos tras 3 segundos sin voz y los muestra cuando vuelve la voz.",
             "textOutline": "Contorno del texto",
             "outlineColor": "Color del contorno",
             "attachToSource": "Vincular a la fuente",
@@ -1037,6 +1045,8 @@ enum AppLocalization {
             "targetTerm": "Zielbegriff",
             "subtitleOverlay": "Untertitel-Overlay",
             "onlyThreeControlsAcceptClicks": "Nur diese 3 Bedienelemente nehmen Klicks an",
+            "autoHideSubtitles": "Untertitel automatisch ausblenden",
+            "autoHideSubtitlesHelp": "Blendet Untertitel nach 3 Sekunden ohne Sprache aus und bei Sprache wieder ein.",
             "textOutline": "Textkontur",
             "outlineColor": "Konturfarbe",
             "attachToSource": "An Quelle anheften",
@@ -1234,6 +1244,8 @@ enum AppLocalization {
             "targetTerm": "訳語",
             "subtitleOverlay": "字幕オーバーレイ",
             "onlyThreeControlsAcceptClicks": "クリックできるのは 3 つのコントロールのみです",
+            "autoHideSubtitles": "字幕を自動的に非表示",
+            "autoHideSubtitlesHelp": "音声が3秒間検出されないと字幕を非表示にし、音声が再開すると表示します。",
             "textOutline": "文字の縁取り",
             "outlineColor": "縁取りの色",
             "attachToSource": "ソースに追従",
@@ -1431,6 +1443,8 @@ enum AppLocalization {
             "targetTerm": "Terme cible",
             "subtitleOverlay": "Superposition des sous-titres",
             "onlyThreeControlsAcceptClicks": "Seuls les 3 contrôles acceptent les clics",
+            "autoHideSubtitles": "Masquer automatiquement les sous-titres",
+            "autoHideSubtitlesHelp": "Masque les sous-titres après 3 secondes sans parole et les réaffiche à la reprise.",
             "textOutline": "Contour du texte",
             "outlineColor": "Couleur du contour",
             "attachToSource": "Attacher à la source",
@@ -1628,6 +1642,8 @@ enum AppLocalization {
             "targetTerm": "대상 용어",
             "subtitleOverlay": "자막 오버레이",
             "onlyThreeControlsAcceptClicks": "3개의 컨트롤만 클릭할 수 있습니다",
+            "autoHideSubtitles": "자막 자동 숨기기",
+            "autoHideSubtitlesHelp": "3초 동안 음성이 감지되지 않으면 자막을 숨기고 음성이 다시 감지되면 표시합니다.",
             "textOutline": "텍스트 외곽선",
             "outlineColor": "외곽선 색상",
             "attachToSource": "소스에 부착",
@@ -1825,6 +1841,8 @@ enum AppLocalization {
             "targetTerm": "مصطلح الهدف",
             "subtitleOverlay": "طبقة الترجمة",
             "onlyThreeControlsAcceptClicks": "3 عناصر تحكم فقط تقبل النقر",
+            "autoHideSubtitles": "إخفاء الترجمة تلقائيًا",
+            "autoHideSubtitlesHelp": "إخفاء الترجمة بعد 3 ثوانٍ دون كلام وإظهارها عند استئناف الكلام.",
             "textOutline": "حد النص",
             "outlineColor": "لون الحد",
             "attachToSource": "ربط بالمصدر",
@@ -2022,6 +2040,8 @@ enum AppLocalization {
             "targetTerm": "Termo de destino",
             "subtitleOverlay": "Sobreposição de legendas",
             "onlyThreeControlsAcceptClicks": "Apenas os 3 controles aceitam cliques",
+            "autoHideSubtitles": "Ocultar legendas automaticamente",
+            "autoHideSubtitlesHelp": "Oculta as legendas após 3 segundos sem fala e volta a mostrá-las quando a fala retorna.",
             "textOutline": "Contorno do texto",
             "outlineColor": "Cor do contorno",
             "attachToSource": "Fixar na fonte",
@@ -2219,6 +2239,8 @@ enum AppLocalization {
             "targetTerm": "Целевой термин",
             "subtitleOverlay": "Наложение субтитров",
             "onlyThreeControlsAcceptClicks": "Только 3 элемента управления принимают клики",
+            "autoHideSubtitles": "Автоматически скрывать субтитры",
+            "autoHideSubtitlesHelp": "Скрывать субтитры через 3 секунды без речи и показывать их при возобновлении речи.",
             "textOutline": "Контур текста",
             "outlineColor": "Цвет контура",
             "attachToSource": "Привязать к источнику",

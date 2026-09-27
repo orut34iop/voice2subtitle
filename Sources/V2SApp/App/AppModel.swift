@@ -10,7 +10,7 @@ import FoundationModels
 
 private enum AppBuildInfo {
     static let marketingVersion = "0.3.32"
-    static let buildNumber = "202609121049"
+    static let buildNumber = "202609271342"
     static let repositoryURLString = "https://github.com/franklioxygen/v2s"
     static let repositoryURL = URL(string: repositoryURLString)
 }
@@ -34,6 +34,8 @@ final class AppModel: ObservableObject {
     private var captionPipelineID = UUID()
     private var liveTranscriptionSession: LiveTranscriptionSession?
     private var liveTranscriptionSessions: [LiveTranscriptionSession] = []
+    private var subtitleAutoHideTask: Task<Void, Never>?
+    private var lastSpeechActivityAt: ContinuousClock.Instant?
     private var captionDisplayTask: Task<Void, Never>?
     private var captionTranslationTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingCaptions: [QueuedCaption] = []
@@ -79,6 +81,11 @@ final class AppModel: ObservableObject {
     var transcriptEntries: [TranscriptEntry] { transcriptStore.entries }
     @Published private(set) var transcriptGeneration: Int = 0
     @Published var isOverlayVisible = false
+    @Published private(set) var isOverlayHiddenForSilence = false
+
+    var shouldShowOverlay: Bool {
+        isOverlayVisible && !isOverlayHiddenForSilence && overlayState != nil
+    }
     @Published private(set) var overlayHistoryVisibleCount = 0
     @Published private(set) var overlayHistoryScrollOffset = 0
 
@@ -172,6 +179,17 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @Published var autoHideSubtitles: Bool {
+        didSet {
+            guard oldValue != autoHideSubtitles else { return }
+            persistSettings()
+            subtitleAutoHideTask?.cancel()
+            subtitleAutoHideTask = nil
+            isOverlayHiddenForSilence = false
+            scheduleSubtitleAutoHideIfNeeded()
+        }
+    }
+
     @Published var glossary: [String: String] {
         didSet {
             persistSettings()
@@ -211,6 +229,7 @@ final class AppModel: ObservableObject {
         self.overlayStyle = normalizedOverlayStyle
         self.subtitleMode = settings.subtitleMode
         self.subtitleDisplayMode = settings.subtitleDisplayMode
+        self.autoHideSubtitles = settings.autoHideSubtitles
         self.glossary = settings.glossary
         self.releasedSpeechResourceIDs = Set(settings.releasedSpeechResourceIDs)
         self.translationHostConfiguration = nil
@@ -236,6 +255,7 @@ final class AppModel: ObservableObject {
     }
 
     deinit {
+        subtitleAutoHideTask?.cancel()
         modelResourceRefreshTask?.cancel()
         modelResourceDownloadTasks.values.forEach { $0.cancel() }
         modelResourceRemovalTasks.values.forEach { $0.cancel() }
@@ -567,7 +587,10 @@ final class AppModel: ObservableObject {
             if sessionLifecycle.accepts(sessionID) {
                 sessionStartTask = nil
                 if sessionState == .starting { sessionState = .idle }
-                if sessionState != .running { _ = sessionLifecycle.invalidate() }
+                if sessionState != .running {
+                    stopSubtitleAutoHideMonitoring()
+                    _ = sessionLifecycle.invalidate()
+                }
             }
         }
         refreshSources()
@@ -612,6 +635,7 @@ final class AppModel: ObservableObject {
         )
         overlayHistoryScrollOffset = 0
         setStatus(.preparing(sourceName: selectedSourceName))
+        beginSubtitleAutoHideMonitoring()
 
         let config = ModeConfig.config(for: subtitleMode)
         let recognitionHints = recognitionContextualStrings()
@@ -651,6 +675,9 @@ final class AppModel: ObservableObject {
                             sourceLanguageID: sourceLanguageID,
                             targetLanguageID: targetLanguageID
                         )
+                    },
+                    speechActivityHandler: { [weak self] instant in
+                        self?.recordSpeechActivity(sessionID: sessionID, at: instant)
                     },
                     errorHandler: { [weak self] message in
                         guard let self, self.sessionLifecycle.accepts(sessionID) else { return }
@@ -725,6 +752,7 @@ final class AppModel: ObservableObject {
     }
 
     func stopSession() {
+        stopSubtitleAutoHideMonitoring()
         let operations = sessionLifecycle.invalidate()
         sessionStartTask?.cancel()
         let startTask = sessionStartTask
@@ -747,6 +775,56 @@ final class AppModel: ObservableObject {
             if self.sessionState == .stopping {
                 self.sessionState = .idle
                 self.setStatus(self.allSources.isEmpty ? .noInputSourcesDetected : .ready)
+            }
+        }
+    }
+
+    // Use a monotonic clock and an independent deadline: capture may stop delivering
+    // buffers entirely when a video ends. Translation callbacks never reset this timer.
+    func beginSubtitleAutoHideMonitoring() {
+        stopSubtitleAutoHideMonitoring()
+        guard sessionLifecycle.currentID != nil else { return }
+        lastSpeechActivityAt = .now
+        scheduleSubtitleAutoHideIfNeeded()
+    }
+
+    func recordSpeechActivity(sessionID: UUID, at instant: ContinuousClock.Instant) {
+        guard sessionLifecycle.accepts(sessionID), let previous = lastSpeechActivityAt else { return }
+        let latest = max(previous, instant)
+        lastSpeechActivityAt = latest
+        // Ignore delayed activity callbacks that are already outside the silence window.
+        if isOverlayHiddenForSilence && latest.advanced(by: .seconds(3)) > .now {
+            isOverlayHiddenForSilence = false
+        }
+        scheduleSubtitleAutoHideIfNeeded()
+    }
+
+    private func stopSubtitleAutoHideMonitoring() {
+        subtitleAutoHideTask?.cancel()
+        subtitleAutoHideTask = nil
+        lastSpeechActivityAt = nil
+        isOverlayHiddenForSilence = false
+    }
+
+    private func scheduleSubtitleAutoHideIfNeeded() {
+        guard autoHideSubtitles, subtitleAutoHideTask == nil,
+              let sessionID = sessionLifecycle.currentID,
+              lastSpeechActivityAt != nil else { return }
+        subtitleAutoHideTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let deadline = self?.lastSpeechActivityAt?.advanced(by: .seconds(3)) else { return }
+                do {
+                    try await Task.sleep(until: deadline, clock: .continuous)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, let self, self.sessionLifecycle.accepts(sessionID),
+                      self.autoHideSubtitles, let latest = self.lastSpeechActivityAt else { return }
+                if latest.advanced(by: .seconds(3)) <= .now {
+                    self.isOverlayHiddenForSilence = true
+                    self.subtitleAutoHideTask = nil
+                    return
+                }
             }
         }
     }
@@ -819,6 +897,7 @@ final class AppModel: ObservableObject {
             overlayStyle: overlayStyle,
             subtitleMode: subtitleMode,
             subtitleDisplayMode: subtitleDisplayMode,
+            autoHideSubtitles: autoHideSubtitles,
             glossary: glossary,
             releasedSpeechResourceIDs: releasedSpeechResourceIDs.sorted()
         )
