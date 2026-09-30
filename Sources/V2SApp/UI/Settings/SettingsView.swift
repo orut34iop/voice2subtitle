@@ -330,7 +330,7 @@ struct SettingsView: View {
                     LabeledSlider(
                         title: model.localized(.backgroundOpacity),
                         value: backgroundOpacityBinding,
-                        range: 0.16 ... 0.72,
+                        range: 0.0 ... 1.0,
                         precision: 2,
                         displayText: "\(Int((model.overlayStyle.backgroundOpacity * 100).rounded()))%"
                     )

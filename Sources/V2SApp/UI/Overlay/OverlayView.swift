@@ -136,7 +136,7 @@ struct OverlayView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: OverlayPanelMetrics.cornerRadius, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                        .opacity(isBackgroundVisible ? 1 : 0)
+                        .opacity(isBackgroundVisible && model.overlayStyle.backgroundOpacity > 0 ? 1 : 0)
                 )
             }
         }
