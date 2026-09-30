@@ -239,8 +239,9 @@ final class OverlayWindowController {
 
     private func configurePanel(_ panel: OverlayPanel, acceptsInput: Bool, level: NSWindow.Level) {
         panel.isReleasedWhenClosed = false
-        panel.level = level
         panel.isFloatingPanel = true
+        // AppKit resets the level when changing the floating-panel flag.
+        panel.level = level
         panel.tabbingMode = .disallowed
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -347,6 +348,8 @@ final class OverlayWindowController {
 
     private func syncWindow() {
         let shouldShow = model.shouldShowOverlay
+        // Style changes must apply even when the overlay is already visible.
+        updateAttachToSourceLevels()
 
         if shouldShow && !panelsShown {
             // Transition: hidden → visible
@@ -1177,12 +1180,12 @@ final class OverlayWindowController {
         let allControlPanels: [OverlayPanel] = [scrollbarPanel] + leftControlButtonPanels
 
         for p in allContentPanels {
-            p.level = contentLevel
             p.isFloatingPanel = useHighLevel
+            p.level = contentLevel
         }
         for p in allControlPanels {
-            p.level = controlLevel
             p.isFloatingPanel = useHighLevel
+            p.level = controlLevel
         }
 
         if panelsShown, presentationChanged, useHighLevel == false {
